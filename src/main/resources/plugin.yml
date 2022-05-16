@@ -1,0 +1,8 @@
+name: CVPaintball
+version: 0.1
+main: org.cubeville.cvpaintball.CVPaintball
+api-version: 1.18
+authors: [ Ptown16 ]
+description: A paintball game for Cubeville!
+website: cubeville.org
+depend: [ CVGames, ArmamentsEffects ]
