@@ -1,5 +1,6 @@
 package org.cubeville.cvpaintball.paintball;
 
+import net.md_5.bungee.api.ChatColor;
 import org.bukkit.*;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;

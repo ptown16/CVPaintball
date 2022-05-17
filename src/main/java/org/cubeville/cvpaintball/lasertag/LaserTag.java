@@ -1,5 +1,6 @@
 package org.cubeville.cvpaintball.lasertag;
 
+import net.md_5.bungee.api.ChatColor;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
@@ -19,6 +20,7 @@ import org.cubeville.cvgames.models.Game;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
+import org.cubeville.cvpaintball.CVPaintball;
 import org.cubeville.effects.Effects;
 import org.cubeville.effects.pluginhook.PluginHookEventReceiver;
 
@@ -32,6 +34,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     private String[] healthColorCodes = {
             "§7§o", "§c", "§6", "§e", "§a"
     };
+    Integer gameCollisionHook;
 
 
     public LaserTag(String id) {
@@ -41,14 +44,15 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class));
         addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
         addGameVariable("teams", new GameVariableList<>(LaserTagTeam.class));
-
-        PluginManager pm = Bukkit.getPluginManager();
-        Effects e = (Effects) pm.getPlugin("ArmamentsEffects");
-        e.getPluginHookManager().hook(Bukkit.getWorld("plugin_test"), new Vector(-1000, 0, -1000), new Vector(1000, 255, 1000), this);
+        addGameVariable("region", new GameVariableRegion());
     }
 
     @Override
     public void onGameStart(List<Player> players) {
+        // Hook into FX
+        GameRegion gameRegion = (GameRegion) getVariable("region");
+        gameCollisionHook = CVPaintball.getFXPlugin().getPluginHookManager().hook(gameRegion.getMin().getWorld(), gameRegion.getMin().toVector(), gameRegion.getMax().toVector(), this);
+
         teams = (List<HashMap<String, Object>>) getVariable("teams");
         List<Float> percentages = new ArrayList<>();
         List<String> teamKeys = new ArrayList<>();
@@ -223,7 +227,10 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     @Override
     public void onGameFinish(List<Player> players) {
         Bukkit.getScheduler().cancelTask(rechargeZoneChecker);
-        rechargeZoneChecker = 0;
+        rechargeZoneChecker = -1;
+
+        CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
+        gameCollisionHook = null;
 
         int remainingTeam = -1;
         Player remainingPlayer = null;
