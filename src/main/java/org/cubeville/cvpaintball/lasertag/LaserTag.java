@@ -69,6 +69,8 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             HashMap<String, Object> team = teams.get(i);
             List<Player> teamPlayers = teamsMap.get(Integer.toString(i));
 
+            if (teamPlayers == null) { continue; }
+
             String teamName = (String) team.get("name");
             ChatColor chatColor = (ChatColor) team.get("chat-color");
             List<Location> tps = (List<Location>) team.get("tps");
