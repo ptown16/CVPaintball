@@ -3,7 +3,7 @@ package org.cubeville.cvpaintball.lasertag;
 import org.bukkit.Color;
 
 public class LaserTagState {
-    int team;
+    Integer team;
     Long lastRecharge = null;
     Long lastHit = null;
     int timesFired, timesHit, points = 0;

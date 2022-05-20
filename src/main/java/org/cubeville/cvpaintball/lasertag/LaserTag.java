@@ -214,16 +214,18 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
 
     @Override
     public void onGameFinish(List<Player> players) {
+        for (Player player : players) {
+            if (state.get(player).armorFlashID != -1) {
+                Bukkit.getScheduler().cancelTask(state.get(player).armorFlashID);
+                state.get(player).armorFlashID = -1;
+            }
+            clearArmorFromInventory(player.getInventory(), -1);
+        }
+
         Bukkit.getScheduler().cancelTask(rechargeZoneScheduler);
         rechargeZoneScheduler = -1;
         Bukkit.getScheduler().cancelTask(scoreboardSecondUpdater);
         scoreboardSecondUpdater = -1;
-
-        for (Player player : players) {
-            Bukkit.getScheduler().cancelTask(state.get(player).armorFlashID);
-            state.get(player).armorFlashID = -1;
-            clearArmorFromInventory(player.getInventory(), -1);
-        }
 
         CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
         gameCollisionHook = null;
@@ -233,6 +235,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         } else {
             finishFFAGame(players);
         }
+        teamScores.clear();
         state.clear();
     }
 
@@ -317,12 +320,19 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     private void sendStatistics(Player player) {
         LaserTagState ps = state.get(player);
         player.sendMessage("§7Points: §f" + ps.points);
-        player.sendMessage("§7Shots fired: §f" + ps.timesFired);
-        if (ps.timesFired == 0 || ps.points == 0) {
-            player.sendMessage("§7Accuracy: §f0.00%");
+        player.sendMessage("§7Times Hit: §f" + ps.timesHit);
+        if (ps.points == 0) {
+            player.sendMessage("§7K/D Ratio: §f0.00");
+        } else if (ps.timesHit == 0) {
+            player.sendMessage("§7K/D Ratio: §f" + ps.points + ".00");
         } else {
-            player.sendMessage("§7Accuracy: §f" + String.format("%.2f", ((float) ps.points / (float) ps.timesFired) * 100F) + "%");
+            player.sendMessage("§7K/D Ratio: §f" + String.format("%.2f", ((float) ps.points / (float) ps.timesHit)));
         }
+//        if (ps.timesFired == 0 || ps.points == 0) {
+//            player.sendMessage("§7Accuracy: §f0.00%");
+//        } else {
+//            player.sendMessage("§7Accuracy: §f" + String.format("%.2f", ((float) ps.points / (float) ps.timesFired) * 100F) + "%");
+//        }
     }
 
     private void updateScoreboard() {
@@ -389,10 +399,12 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             if (teams.size() > 1) {
                 if (teamScores.get(attackerState.team) >= (int) getVariable("max-score")) {
                     finishGame(new ArrayList<>(state.keySet()));
+                    return;
                 }
             } else {
                 if (attackerState.points >= (int) getVariable("max-score")) {
                     finishGame(new ArrayList<>(state.keySet()));
+                    return;
                 }
             }
 
