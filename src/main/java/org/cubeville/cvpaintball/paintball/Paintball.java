@@ -50,11 +50,14 @@ public class Paintball extends Game {
             percentages.add(1.0F / ((float) teams.size()));
         }
 
+
         Map<String, List<Player>> teamsMap = GameUtils.divideTeams(players, teamKeys, percentages);
 
         for (int i = 0; i < teams.size(); i++) {
             HashMap<String, Object> team = teams.get(i);
             List<Player> teamPlayers = teamsMap.get(Integer.toString(i));
+
+            if (teamPlayers == null) { continue; }
 
             String teamName = (String) team.get("name");
             ChatColor chatColor = (ChatColor) team.get("chat-color");
