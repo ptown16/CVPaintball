@@ -353,7 +353,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             });
             scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA Laser Tag", scoreboardLines);
         } else {
-            for (int i = 0; i < teams.size(); i++) {
+            for (int i = 0; i < teamScores.size(); i++) {
                 String line = teams.get(i).get("name") + "§f: ";
                 line += teamScores.get(i);
                 line += " points";
