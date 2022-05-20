@@ -1,12 +1,15 @@
 package org.cubeville.cvpaintball.lasertag;
 
+import org.bukkit.Color;
+
 public class LaserTagState {
-    int health = 4;
     int team;
     Long lastRecharge = null;
-    Long lastFire = null;
-    int timesFired = 0;
-    int timesHit = 0;
+    Long lastHit = null;
+    int timesFired, timesHit, points = 0;
+    int armorFlashID = -1;
+    Color currentArmorColor;
+    boolean isInvulnerable = false;
 
     public LaserTagState(int team) {
         this.team = team;

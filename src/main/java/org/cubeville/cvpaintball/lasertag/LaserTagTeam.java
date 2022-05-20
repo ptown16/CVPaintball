@@ -8,8 +8,7 @@ public class LaserTagTeam extends GameVariableObject {
         addField("name", new GameVariableString());
         addField("laser-gun", new GameVariableItem());
         addField("chat-color", new GameVariableChatColor());
-        addField("armor-color", new GameVariableString());
-        addField("armor-color-damaged", new GameVariableString());
+        addField("armor-color", new GameVariableArmorColor());
         addField("tps", new GameVariableList<>(GameVariableLocation.class));
     }
 

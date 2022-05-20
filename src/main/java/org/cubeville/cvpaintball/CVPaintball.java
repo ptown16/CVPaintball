@@ -9,10 +9,12 @@ import org.cubeville.effects.Effects;
 
 public final class CVPaintball extends JavaPlugin {
 
+    private static CVPaintball instance;
     private static Effects effects;
 
     @Override
     public void onEnable() {
+        instance = this;
         CVGames.gameManager().registerGame("paintball", Paintball.class);
         CVGames.gameManager().registerGame("lasertag", LaserTag.class);
         PluginManager pm = Bukkit.getPluginManager();
@@ -22,6 +24,8 @@ public final class CVPaintball extends JavaPlugin {
     public void onDisable() {
         // Plugin shutdown logic
     }
+
+    public static CVPaintball getInstance() { return instance; }
 
     public static Effects getFXPlugin() {
         return effects;

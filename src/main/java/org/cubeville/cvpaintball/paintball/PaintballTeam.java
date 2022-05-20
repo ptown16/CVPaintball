@@ -8,8 +8,8 @@ public class PaintballTeam extends GameVariableObject {
         addField("name", new GameVariableString());
         addField("snowball-name", new GameVariableString());
         addField("chat-color", new GameVariableChatColor());
-        addField("armor-color", new GameVariableString());
-        addField("armor-color-damaged", new GameVariableString());
+        addField("armor-color", new GameVariableArmorColor());
+        addField("armor-color-damaged", new GameVariableArmorColor());
         addField("tps", new GameVariableList<>(GameVariableLocation.class));
     }
 

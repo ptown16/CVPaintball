@@ -16,6 +16,7 @@ import org.cubeville.cvgames.models.Game;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
+import org.cubeville.cvpaintball.CVPaintball;
 
 import java.util.*;
 
@@ -83,7 +84,7 @@ public class Paintball extends Game {
 
         List<GameRegion> rechargeZones = (List<GameRegion>) getVariable("recharge-zones");
         int cooldown = (int) getVariable("recharge-cooldown");
-        rechargeZoneChecker = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVGames.getInstance(), () -> {
+        rechargeZoneChecker = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
             for (GameRegion rechargeZone : rechargeZones) {
                 for (Player player : state.keySet()) {
                     if (rechargeZone.containsPlayer(player)) {
@@ -143,8 +144,8 @@ public class Paintball extends Game {
         List<Material> armorMats = List.of(Material.LEATHER_CHESTPLATE, Material.LEATHER_BOOTS, Material.LEATHER_LEGGINGS, Material.LEATHER_HELMET);
         HashMap<String, Object> team = teams.get(state.get(player).team);
 
-        Color healthyColor = GameUtils.hex2Color((String) team.get("armor-color"));
-        Color damagedColor = GameUtils.hex2Color((String) team.get("armor-color-damaged"));
+        Color healthyColor = (Color) team.get("armor-color");
+        Color damagedColor = (Color) team.get("armor-color-damaged");
 
         int health = state.get(player).health;
         PlayerInventory inv = player.getInventory();
@@ -192,8 +193,6 @@ public class Paintball extends Game {
             // if the player isn't shooting themselves or their teammate
             if (hit.equals(attacker) || (hitState.team == attackerState.team && teams.size() > 1)) { return; }
 
-            PlayerInventory inv = hit.getInventory();
-
             hitState.health -= 1;
             attackerState.timesHit += 1;
 
@@ -205,7 +204,7 @@ public class Paintball extends Game {
             setPlayerArmor(hit);
 
             if (hitState.health == 0) {
-                inv.clear();
+                hit.getInventory().clear();
                 if (!testGameEnd()) {
                     hit.sendMessage("§4§lYou have been eliminated!");
                     hit.teleport((Location) getVariable("spectate-lobby"));
@@ -300,19 +299,6 @@ public class Paintball extends Game {
         }
     }
 
-    private Scoreboard getScoreboard(String title, List<String> items) {
-        ScoreboardManager manager = Bukkit.getScoreboardManager();
-        Scoreboard scoreboard = manager.getNewScoreboard();
-        String objName = "pb-" + arena.getName();
-        objName = objName.substring(0, Math.min(objName.length(), 16));
-        Objective pbObjective = scoreboard.registerNewObjective(objName, "dummy", title);
-        pbObjective.setDisplaySlot(DisplaySlot.SIDEBAR);
-        for (int i = 0; i < items.size(); i++) {
-            pbObjective.getScore(items.get(i)).setScore(items.size() - i);
-        }
-        return scoreboard;
-    }
-
     private void updateScoreboard() {
         Scoreboard scoreboard;
         if (teams.size() == 1) {
@@ -321,7 +307,7 @@ public class Paintball extends Game {
                 int health = state.get(p).health;
                 scoreboardLines.add(healthColorCodes[health] + p.getDisplayName() + "§f: " + health + " HP");
             });
-            scoreboard = getScoreboard("§b§lFFA Paintball", scoreboardLines);
+            scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA Paintball", scoreboardLines);
         } else {
             HashMap<Integer, Integer> countPerTeam = new HashMap<>();
             for (Player p : remainingPlayers()) {
@@ -350,7 +336,7 @@ public class Paintball extends Game {
                 }
                 scoreboardLines.add(line);
             }
-            scoreboard = getScoreboard("§b§lTeam Paintball", scoreboardLines);
+            scoreboard = GameUtils.createScoreboard(arena, "§b§lTeam Paintball", scoreboardLines);
         }
         this.state.keySet().forEach(p -> p.setScoreboard(scoreboard));
     }

@@ -4,36 +4,31 @@ import net.md_5.bungee.api.ChatColor;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.Snowball;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.entity.ProjectileHitEvent;
-import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.plugin.PluginManager;
 import org.bukkit.scoreboard.*;
-import org.bukkit.util.Vector;
 import org.cubeville.cvgames.CVGames;
+import org.cubeville.cvgames.models.Arena;
 import org.cubeville.cvgames.models.Game;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
 import org.cubeville.cvpaintball.CVPaintball;
-import org.cubeville.effects.Effects;
 import org.cubeville.effects.pluginhook.PluginHookEventReceiver;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class LaserTag extends Game implements PluginHookEventReceiver {
 
-    int rechargeZoneChecker;
+    private int rechargeZoneScheduler, scoreboardSecondUpdater;
     private final HashMap<Player, LaserTagState> state = new HashMap<>();
+    private final ArrayList<Integer> teamScores = new ArrayList<>();
+    private long startTime = 0;
+    private long currentTime;
+
     private List<HashMap<String, Object>> teams;
-    private String[] healthColorCodes = {
-            "§7§o", "§c", "§6", "§e", "§a"
-    };
     Integer gameCollisionHook;
 
 
@@ -45,6 +40,13 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
         addGameVariable("teams", new GameVariableList<>(LaserTagTeam.class));
         addGameVariable("region", new GameVariableRegion());
+        addGameVariable("duration", new GameVariableInt(), 5);
+        addGameVariable("max-score", new GameVariableInt(), 20);
+        addGameVariable("invin-duration", new GameVariableInt(), 2);
+        addGameVariable("armor-color-invin-1", new GameVariableArmorColor(), "#FFFF00");
+        addGameVariable("armor-color-invin-2", new GameVariableArmorColor(), "#000000");
+
+
     }
 
     @Override
@@ -71,13 +73,16 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             ChatColor chatColor = (ChatColor) team.get("chat-color");
             List<Location> tps = (List<Location>) team.get("tps");
 
+            teamScores.add(0);
+
             int j = 0;
             for (Player player : teamPlayers) {
                 state.put(player, new LaserTagState(i));
 
                 player.getInventory().clear();
                 resetPlayerGun(player);
-                setPlayerArmor(player);
+                Color armorColor = (Color) team.get("armor-color");
+                setPlayerArmor(player, armorColor, true);
 
                 Location tpLoc = tps.get(j);
                 if (!tpLoc.getChunk().isLoaded()) {
@@ -95,13 +100,16 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
 
         List<GameRegion> rechargeZones = (List<GameRegion>) getVariable("recharge-zones");
         int cooldown = (int) getVariable("recharge-cooldown");
-        rechargeZoneChecker = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVGames.getInstance(), () -> {
-            for (GameRegion rechargeZone : rechargeZones) {
-                for (Player player : state.keySet()) {
+        rechargeZoneScheduler = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
+            for (Player player : state.keySet()) {
+
+                LaserTagState playerState = state.get(player);
+                // check recharge
+                for (GameRegion rechargeZone : rechargeZones) {
                     if (rechargeZone.containsPlayer(player)) {
-                        Long lastRecharge = state.get(player).lastRecharge;
+                        Long lastRecharge = playerState.lastRecharge;
                         if (lastRecharge == null || System.currentTimeMillis() - lastRecharge > (cooldown * 1000L)) {
-                            state.get(player).lastRecharge = System.currentTimeMillis();
+                            playerState.lastRecharge = System.currentTimeMillis();
                             player.sendMessage("§b§lAmmo Recharged! §f§o(Cooldown: " + cooldown + " seconds)");
                             resetPlayerGun(player);
                         }
@@ -110,26 +118,19 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             }
         }, 0L, 2L);
 
+        startTime = System.currentTimeMillis();
+
+        long duration = ((int) getVariable("duration")) * 60L * 1000L;
+        scoreboardSecondUpdater = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
+            currentTime = duration - (System.currentTimeMillis() - startTime);
+            if (currentTime > 0) {
+                updateScoreboard();
+            } else {
+                finishGame(new ArrayList<>(state.keySet()));
+            }
+        }, 0L, 20L);
+
         updateScoreboard();
-    }
-
-    private Set<Integer> remainingTeams() {
-        Set<Integer> stillInGame = new HashSet<>();
-        for (LaserTagState ps : state.values()) {
-            if (ps.health == 0 || stillInGame.contains(ps.team)) { continue; }
-            stillInGame.add(ps.team);
-        }
-        return stillInGame;
-    }
-
-    private Set<Player> remainingPlayers() {
-        Set<Player> stillInGame = new HashSet<>();
-        for (Player player : state.keySet()) {
-            LaserTagState ps = state.get(player);
-            if (ps.health == 0) { continue; }
-            stillInGame.add(player);
-        }
-        return stillInGame;
     }
 
     private void resetPlayerGun(Player player) {
@@ -152,178 +153,201 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         inv.addItem(laserGun);
     }
 
-    private void setPlayerArmor(Player player) {
+    private void clearArmorFromInventory(PlayerInventory inv, int safeIndex) {
         List<Material> armorMats = List.of(Material.LEATHER_CHESTPLATE, Material.LEATHER_BOOTS, Material.LEATHER_LEGGINGS, Material.LEATHER_HELMET);
-        HashMap<String, Object> team = teams.get(state.get(player).team);
-
-        Color healthyColor = GameUtils.hex2Color((String) team.get("armor-color"));
-        Color damagedColor = GameUtils.hex2Color((String) team.get("armor-color-damaged"));
-
-        int health = state.get(player).health;
-        PlayerInventory inv = player.getInventory();
 
         // clear out all armor
         ItemStack[] invContents = inv.getContents();
         for (int i = 0; i < invContents.length; i++) {
+            if (i == safeIndex) continue;
             if (invContents[i] != null && armorMats.contains(invContents[i].getType())) {
                 inv.setItem(i, null);
             }
         }
 
-        ItemStack helmet = GameUtils.createColoredLeatherArmor(Material.LEATHER_HELMET, health >= 4 ? healthyColor : damagedColor);
-        ItemStack chest = GameUtils.createColoredLeatherArmor(Material.LEATHER_CHESTPLATE, health >= 3 ? healthyColor : damagedColor);
-        ItemStack leggings = GameUtils.createColoredLeatherArmor(Material.LEATHER_LEGGINGS, health >= 2 ? healthyColor : damagedColor);
-        ItemStack boots = GameUtils.createColoredLeatherArmor(Material.LEATHER_BOOTS, health >= 1 ? healthyColor : damagedColor);
+    }
+    private void setPlayerArmor(Player player, Color color, boolean setInventoryItem) {
+        Color healthyColor = (Color) teams.get(state.get(player).team).get("armor-color");
+        setPlayerArmor(player, color, setInventoryItem, healthyColor);
+    }
 
-        inv.setItem(5, helmet);
-        inv.setItem(6, chest);
-        inv.setItem(7, leggings);
-        inv.setItem(8, boots);
+    private void setPlayerArmor(Player player, Color color, boolean setInventoryItem, Color secondaryColor) {
+        PlayerInventory inv = player.getInventory();
+        clearArmorFromInventory(inv, setInventoryItem ? -1 : 8);
 
-        inv.setHelmet(helmet);
+        ItemStack chest = GameUtils.createColoredLeatherArmor(Material.LEATHER_CHESTPLATE, color);
+
+        if (setInventoryItem) {
+            inv.setItem(8, chest);
+        }
         inv.setChestplate(chest);
-        inv.setLeggings(leggings);
-        inv.setBoots(boots);
-    }
-
-    @EventHandler
-    public void onProjectileLaunch(ProjectileLaunchEvent event) {
-        if (!event.getEntityType().equals(EntityType.SNOWBALL) || !(event.getEntity().getShooter() instanceof Player)) return;
-        LaserTagState pbs = state.get((Player) event.getEntity().getShooter());
-        if (pbs == null) return;
-
-        Long cooldown = (Long) getVariable("fire-cooldown");
-        if (pbs.lastFire != null && (System.currentTimeMillis() - pbs.lastFire) <= (cooldown * 1000L)) {
-            // don't fire too fast
-            event.setCancelled(true);
-            pbs.lastFire = System.currentTimeMillis();
-            return;
-        }
-        pbs.timesFired += 1;
-    }
-
-    private boolean testGameEnd() {
-        if (teams.size() == 1) {
-            if (remainingPlayers().size() <= 1) {
-                finishGame(new ArrayList<>(state.keySet()));
-                return true;
-            }
-        } else {
-            if (remainingTeams().size() <= 1) {
-                finishGame(new ArrayList<>(state.keySet()));
-                return true;
-            }
-        }
-        return false;
+        inv.setHelmet(GameUtils.createColoredLeatherArmor(Material.LEATHER_HELMET, secondaryColor));
+        inv.setLeggings(GameUtils.createColoredLeatherArmor(Material.LEATHER_LEGGINGS, secondaryColor));
+        inv.setBoots(GameUtils.createColoredLeatherArmor(Material.LEATHER_BOOTS, secondaryColor));
     }
 
     @Override
     public void onPlayerLogout(Player p) {
+        if (isLastOnTeam(p)) {
+            teamScores.set(state.get(p).team, -1);
+        }
+        Bukkit.getScheduler().cancelTask(state.get(p).armorFlashID);
+        state.get(p).armorFlashID = -1;
         state.remove(p);
-        testGameEnd();
+        if (state.size() <= 1) { finishGame(new ArrayList<>(state.keySet())); }
+        if (teamScores.stream().filter(score -> score != -1).count() <= 1) {
+            finishGame(new ArrayList<>(state.keySet()));
+        }
         p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
+    }
+
+    private boolean isLastOnTeam(Player p) {
+        LaserTagState lts = state.get(p);
+        if (lts == null) return false;
+        for (Player player : state.keySet()) {
+            if (!player.equals(p) && state.get(p).team == lts.team) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
     public void onGameFinish(List<Player> players) {
-        Bukkit.getScheduler().cancelTask(rechargeZoneChecker);
-        rechargeZoneChecker = -1;
+        Bukkit.getScheduler().cancelTask(rechargeZoneScheduler);
+        rechargeZoneScheduler = -1;
+        Bukkit.getScheduler().cancelTask(scoreboardSecondUpdater);
+        scoreboardSecondUpdater = -1;
+
+        for (Player player : players) {
+            Bukkit.getScheduler().cancelTask(state.get(player).armorFlashID);
+            state.get(player).armorFlashID = -1;
+            clearArmorFromInventory(player.getInventory(), -1);
+        }
 
         CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
         gameCollisionHook = null;
 
-        int remainingTeam = -1;
-        Player remainingPlayer = null;
-
         if (teams.size() > 1) {
-            for (int rt : remainingTeams()) { remainingTeam = rt; }
-            if (remainingTeam < 0) { return; }
+            finishTeamGame(players);
         } else {
-            // ffa game
-            remainingTeam = 0;
-            for (Player player : remainingPlayers()) { remainingPlayer = player; }
-            if (remainingPlayer == null) { return; }
-        }
-        ChatColor chatColor = (ChatColor) teams.get(remainingTeam).get("chat-color");
-        if (teams.size() == 1) {
-            for (Player player : players) {
-                player.sendMessage(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
-                sendStatistics(player);
-                player.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
-            }
-        } else {
-            String teamName = (String) teams.get(remainingTeam).get("name");
-            for (Player player : players) {
-                player.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
-                sendStatistics(player);
-                player.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
-            }
+            finishFFAGame(players);
         }
         state.clear();
     }
 
-    private void sendStatistics(Player player) {
-        LaserTagState ps = state.get(player);
-        //player.sendMessage("§7Shots fired: §f" + ps.timesFired);
-        player.sendMessage("§7Shots hit: §f" + ps.timesHit);
-        if (ps.timesFired == 0 || ps.timesHit == 0) {
-            //player.sendMessage("§7Accuracy: §f0.00%");
-        } else {
-            //player.sendMessage("§7Accuracy: §f" + String.format("%.2f", ((float) ps.timesHit / (float) ps.timesFired) * 100F) + "%");
+    private void finishFFAGame(List<Player> players) {
+        List<Player> topPlayers = new ArrayList<>();
+        for (Player player : players) {
+            if (topPlayers.size() == 0) {
+                topPlayers.add(player);
+                continue;
+            }
+            int maxScore = state.get(topPlayers.get(0)).points;
+            if (maxScore < state.get(player).points) {
+                topPlayers = List.of(player);
+            } else if (maxScore == state.get(player).points) {
+                topPlayers.add(player);
+            }
         }
+
+        ChatColor chatColor = (ChatColor) teams.get(0).get("chat-color");
+        List<Player> finalTopPlayers = topPlayers;
+
+
+        if (finalTopPlayers.size() != 1) {
+            players.forEach(p -> {
+                String output = "";
+                output += chatColor;
+                for (int i = 0; i < finalTopPlayers.size(); i++) {
+                    if (i == (finalTopPlayers.size() - 1)) {
+                        output += ", " + finalTopPlayers.get(i).getDisplayName();
+                    } else if (i == 0) {
+                        output += finalTopPlayers.get(i).getDisplayName();
+                    } else {
+                        output += "and " + finalTopPlayers.get(i).getDisplayName();
+                    }
+                }
+                output += " win the game!";
+                p.sendMessage(output);
+                playerPostGame(p);
+            });
+            return;
+        }
+
+        players.forEach(p -> {
+            p.sendMessage(chatColor + finalTopPlayers.get(0).getDisplayName() + " has won the game!");
+            playerPostGame(p);
+        });
     }
 
-    private Scoreboard getScoreboard(String title, List<String> items) {
-        ScoreboardManager manager = Bukkit.getScoreboardManager();
-        Scoreboard scoreboard = manager.getNewScoreboard();
-        String objName = "pb-" + arena.getName();
-        objName = objName.substring(0, Math.min(objName.length(), 16));
-        Objective pbObjective = scoreboard.registerNewObjective(objName, "dummy", title);
-        pbObjective.setDisplaySlot(DisplaySlot.SIDEBAR);
-        for (int i = 0; i < items.size(); i++) {
-            pbObjective.getScore(items.get(i)).setScore(items.size() - i);
+
+    private void finishTeamGame(List<Player> players) {
+        List<Integer> topTeams = new ArrayList<>(List.of(0));
+        for (int i = 1; i < teamScores.size(); i++) {
+            int maxScore = teamScores.get(topTeams.get(0));
+            if (maxScore < teamScores.get(i)) {
+                topTeams = List.of(i);
+            } else if (maxScore == teamScores.get(i)) {
+                topTeams.add(i);
+            }
         }
-        return scoreboard;
+
+        if (topTeams.size() != 1) {
+            players.forEach(p -> {
+                p.sendMessage("§f§lTie Game!");
+                playerPostGame(p);
+            });
+            return;
+        }
+
+        String teamName = (String) teams.get(topTeams.get(0)).get("name");
+        ChatColor chatColor = (ChatColor) teams.get(topTeams.get(0)).get("chat-color");
+        players.forEach(p -> {
+            p.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
+            playerPostGame(p);
+        });
+    }
+
+    private void playerPostGame(Player p) {
+        sendStatistics(p);
+        p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
+    }
+
+    private void sendStatistics(Player player) {
+        LaserTagState ps = state.get(player);
+        player.sendMessage("§7Points: §f" + ps.points);
+        player.sendMessage("§7Shots fired: §f" + ps.timesFired);
+        if (ps.timesFired == 0 || ps.points == 0) {
+            player.sendMessage("§7Accuracy: §f0.00%");
+        } else {
+            player.sendMessage("§7Accuracy: §f" + String.format("%.2f", ((float) ps.points / (float) ps.timesFired) * 100F) + "%");
+        }
     }
 
     private void updateScoreboard() {
         Scoreboard scoreboard;
-        if (teams.size() == 1) {
-            ArrayList<String> scoreboardLines = new ArrayList<>();
-            state.keySet().stream().sorted(Comparator.comparingInt(o -> -1 * state.get(o).health)).forEach( p -> {
-                int health = state.get(p).health;
-                scoreboardLines.add(healthColorCodes[health] + p.getDisplayName() + "§f: " + health + " HP");
-            });
-            scoreboard = getScoreboard("§b§lFFA Laser Tag", scoreboardLines);
-        } else {
-            HashMap<Integer, Integer> countPerTeam = new HashMap<>();
-            for (Player p : remainingPlayers()) {
-                int team = state.get(p).team;
-                if (!countPerTeam.containsKey(team)) {
-                    countPerTeam.put(team, 1);
-                } else {
-                    countPerTeam.put(team, countPerTeam.get(team) + 1);
-                }
-            }
+        ArrayList<String> scoreboardLines = new ArrayList<>();
 
-            List<String> scoreboardLines = new ArrayList<>();
+        scoreboardLines.add("§bTime remaining: §f" +
+                String.format("%d:%02d", (int) currentTime / 60000, (int) (currentTime / 1000) % 60)
+        );
+        scoreboardLines.add("   ");
+
+        if (teams.size() == 1) {
+            state.keySet().stream().sorted(Comparator.comparingInt(o -> -1 * state.get(o).points)).forEach( p -> {
+                int points = state.get(p).points;
+                scoreboardLines.add("§a" + p.getDisplayName() + "§f: " + points + " points");
+            });
+            scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA Laser Tag", scoreboardLines);
+        } else {
             for (int i = 0; i < teams.size(); i++) {
                 String line = teams.get(i).get("name") + "§f: ";
-                if (!countPerTeam.containsKey(i)) {
-                    line += "§c\uD83D\uDDF4";
-                } else {
-                    int remaining = countPerTeam.get(i);
-                    line += remaining;
-                    if (remaining == 1) {
-                        line += " player left";
-                    } else {
-                        line += " players left";
-                    }
-
-                }
+                line += teamScores.get(i);
+                line += " points";
                 scoreboardLines.add(line);
             }
-            scoreboard = getScoreboard("§b§lTeam Laser Tag", scoreboardLines);
+            scoreboard = GameUtils.createScoreboard(arena, "§b§lTeam Laser Tag", scoreboardLines);
         }
         this.state.keySet().forEach(p -> p.setScoreboard(scoreboard));
     }
@@ -331,42 +355,75 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     @Override
     public void onBlockCollisionEvent(Player player, Block block) {
         // do something eventually :D
+        LaserTagState pState = state.get(player);
+        if (pState != null) {
+            pState.timesFired += 1;
+        }
         return;
     }
 
     @Override
     public void onEntityCollisionEvent(Player attacker, Entity entity) {
+        LaserTagState attackerState = state.get(attacker);
+        if (attackerState == null) { return; }
+        attackerState.timesFired += 1;
         if (entity instanceof Player) {
             Player hit = (Player) entity;
 
             LaserTagState hitState = state.get(hit);
-            LaserTagState attackerState = state.get(attacker);
 
             // return if either player is not in the game
-            if (hitState == null || attackerState == null) { return; }
+            if (hitState == null ) { return; }
 
             // if the player isn't shooting themselves or their teammate
             if (hit.equals(attacker) || (hitState.team == attackerState.team && teams.size() > 1)) { return; }
 
-            PlayerInventory inv = hit.getInventory();
+            if (hitState.isInvulnerable) { return; }
 
-            hitState.health -= 1;
-            attackerState.timesHit += 1;
+            attackerState.points += 1;
+            hitState.timesHit += 1;
+            hitState.lastHit = System.currentTimeMillis();
+            hitState.isInvulnerable = true;
+            teamScores.set(attackerState.team, teamScores.get(attackerState.team) + 1);
+
+            if (teams.size() > 1) {
+                if (teamScores.get(attackerState.team) >= (int) getVariable("max-score")) {
+                    finishGame(new ArrayList<>(state.keySet()));
+                }
+            } else {
+                if (attackerState.points >= (int) getVariable("max-score")) {
+                    finishGame(new ArrayList<>(state.keySet()));
+                }
+            }
+
+            long invinDuration = ((int) getVariable("invin-duration") * 1000L);
+            Color hitColor1 = (Color) getVariable("armor-color-invin-1");
+            Color hitColor2 = (Color) getVariable("armor-color-invin-2");
+
+            hitState.armorFlashID = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
+                LaserTagState playerState = state.get(hit);
+                if (System.currentTimeMillis() - playerState.lastHit > invinDuration) {
+                    playerState.isInvulnerable = false;
+                    setPlayerArmor(hit, (Color) teams.get(playerState.team).get("armor-color"), true);
+                    Bukkit.getScheduler().cancelTask(playerState.armorFlashID);
+                    playerState.armorFlashID = -1;
+                } else {
+                    if (playerState.currentArmorColor.equals(hitColor1)) {
+                        playerState.currentArmorColor = hitColor2;
+                        setPlayerArmor(hit, hitColor2, false);
+                    } else {
+                        playerState.currentArmorColor = hitColor1;
+                        setPlayerArmor(hit, hitColor1, false);
+                    }
+                }
+            }, 0L, 5L);
 
             attacker.sendMessage("§aYou have hit " + hit.getName() + "!");
             attacker.playSound(attacker.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0F, 0.7F);
             hit.sendMessage("§cYou have been hit by " + attacker.getName() + "!");
-
+            setPlayerArmor(hit, hitColor1, true);
+            hitState.currentArmorColor = hitColor1;
             updateScoreboard();
-            setPlayerArmor(hit);
-
-            if (hitState.health == 0) {
-                inv.clear();
-                if (!testGameEnd()) {
-                    hit.sendMessage("§4§lYou have been eliminated!");
-                    hit.teleport((Location) getVariable("spectate-lobby"));
-                }
-            }
         }
     }
 }
