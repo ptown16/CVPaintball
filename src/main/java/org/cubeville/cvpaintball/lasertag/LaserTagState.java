@@ -8,7 +8,7 @@ public class LaserTagState {
     Long lastHit = null;
     int timesFired, timesHit, points = 0;
     int armorFlashID = -1;
-    Color currentArmorColor;
+    boolean flashingFirstColor = true;
     boolean isInvulnerable = false;
 
     public LaserTagState(int team) {

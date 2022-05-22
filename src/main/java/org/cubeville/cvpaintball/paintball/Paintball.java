@@ -16,16 +16,19 @@ import org.cubeville.cvgames.models.Game;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
+import org.cubeville.cvloadouts.CVLoadouts;
 import org.cubeville.cvpaintball.CVPaintball;
+import org.cubeville.cvpaintball.PBUtils;
 
 import java.util.*;
 
 public class Paintball extends Game {
 
     int rechargeZoneChecker;
+    private String error;
     private final HashMap<Player, PaintballState> state = new HashMap<>();
     private List<HashMap<String, Object>> teams;
-    private String[] healthColorCodes = {
+    private final String[] healthColorCodes = {
             "§7§o", "§c", "§6", "§e", "§a"
     };
 
@@ -38,6 +41,7 @@ public class Paintball extends Game {
         addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
         addGameVariable("fire-cooldown", new GameVariableDouble(), 0.5);
         addGameVariable("teams", new GameVariableList<>(PaintballTeam.class));
+        addGameVariable("loadout-name", new GameVariableString());
     }
 
     @Override
@@ -68,8 +72,11 @@ public class Paintball extends Game {
                 state.put(player, new PaintballState(i));
 
                 player.getInventory().clear();
-                resetPlayerSnowballs(player);
-                setPlayerArmor(player);
+
+                CVLoadouts.getInstance().applyLoadoutToPlayer(player,
+                        (String) getVariable("loadout-name"),
+                        Set.of((String) team.get("loadout-team"))
+                );
 
                 Location tpLoc = tps.get(j);
                 if (!tpLoc.getChunk().isLoaded()) {
@@ -128,56 +135,16 @@ public class Paintball extends Game {
         HashMap<String, Object> team = teams.get(state.get(player).team);
         PlayerInventory inv = player.getInventory();
 
-        // clear out all other snowballs
-        ItemStack[] invContents = inv.getContents();
-        for (int i = 0; i < invContents.length; i++) {
-            if (invContents[i] != null && invContents[i].getType().equals(Material.SNOWBALL)) {
-                inv.setItem(i, null);
-            }
-        }
+        String loadoutName = (String) getVariable("loadout-name");
+        String teamName = (String) team.get("loadout-team");
 
-        inv.addItem(GameUtils.customItem(
-                Material.SNOWBALL,
-                (String) team.get("snowball-name"),
-                (int) getVariable("ammo")
-        ));
+
+        ItemStack snowballs = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 0);
+
+        if (snowballs == null) { finishGameWithError("Could not find snowballs in slot 0 in loadout " + loadoutName + " with team " + teamName); return; }
+        PBUtils.clearItemsFromInventory(player.getInventory(), List.of(snowballs));
+        inv.setItem(0, snowballs);
     }
-
-    private void setPlayerArmor(Player player) {
-        List<Material> armorMats = List.of(Material.LEATHER_CHESTPLATE, Material.LEATHER_BOOTS, Material.LEATHER_LEGGINGS, Material.LEATHER_HELMET);
-        HashMap<String, Object> team = teams.get(state.get(player).team);
-
-        Color healthyColor = (Color) team.get("armor-color");
-        Color damagedColor = (Color) team.get("armor-color-damaged");
-
-        int health = state.get(player).health;
-        PlayerInventory inv = player.getInventory();
-
-        // clear out all armor
-        ItemStack[] invContents = inv.getContents();
-        for (int i = 0; i < invContents.length; i++) {
-            if (invContents[i] != null && armorMats.contains(invContents[i].getType())) {
-                inv.setItem(i, null);
-            }
-        }
-
-        ItemStack helmet = GameUtils.createColoredLeatherArmor(Material.LEATHER_HELMET, health >= 4 ? healthyColor : damagedColor);
-        ItemStack chest = GameUtils.createColoredLeatherArmor(Material.LEATHER_CHESTPLATE, health >= 3 ? healthyColor : damagedColor);
-        ItemStack leggings = GameUtils.createColoredLeatherArmor(Material.LEATHER_LEGGINGS, health >= 2 ? healthyColor : damagedColor);
-        ItemStack boots = GameUtils.createColoredLeatherArmor(Material.LEATHER_BOOTS, health >= 1 ? healthyColor : damagedColor);
-
-        inv.setItem(5, helmet);
-        inv.setItem(6, chest);
-        inv.setItem(7, leggings);
-        inv.setItem(8, boots);
-
-        inv.setHelmet(helmet);
-        inv.setChestplate(chest);
-        inv.setLeggings(leggings);
-        inv.setBoots(boots);
-    }
-
-
 
     @EventHandler
     public void onProjectileHit(ProjectileHitEvent event) {
@@ -204,14 +171,45 @@ public class Paintball extends Game {
             hit.sendMessage("§cYou have been hit by " + attacker.getName() + "!");
 
             updateScoreboard();
-            setPlayerArmor(hit);
 
-            if (hitState.health == 0) {
-                hit.getInventory().clear();
-                if (!testGameEnd()) {
-                    hit.sendMessage("§4§lYou have been eliminated!");
-                    hit.teleport((Location) getVariable("spectate-lobby"));
-                }
+            String loadoutName = (String) getVariable("loadout-name");
+            String teamName = (String) teams.get(hitState.team).get("loadout-team");
+
+            switch (hitState.health) {
+                case 3:
+                    ItemStack helmet = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 45);
+                    ItemStack damagedHelmet = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 36);
+                    if (helmet == null) { finishGameWithError("Could not find helmet in helmet slot in loadout " + loadoutName + " with team " + teamName); return; }
+                    if (damagedHelmet == null) { finishGameWithError("Could not find damaged helmet slot 36 in loadout " + loadoutName + " with team " + teamName); return; }
+                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(helmet));
+                    hit.getInventory().setHelmet(damagedHelmet);
+                    hit.getInventory().setItem(5, damagedHelmet);
+                    break;
+                case 2:
+                    ItemStack chest = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 46);
+                    ItemStack damagedChest = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 37);
+                    if (chest == null) { finishGameWithError("Could not find chestplate in chestplate slot in loadout " + loadoutName + " with team " + teamName); return; }
+                    if (damagedChest == null) { finishGameWithError("Could not find damaged chestplate slot 37 in loadout " + loadoutName + " with team " + teamName); return; }
+                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(chest));
+                    hit.getInventory().setChestplate(damagedChest);
+                    hit.getInventory().setItem(6, damagedChest);
+                    break;
+                case 1:
+                    ItemStack leggings = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 47);
+                    ItemStack damagedLeggings = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 38);
+                    if (leggings == null) { finishGameWithError("Could not find leggings in leggings slot in loadout " + loadoutName + " with team " + teamName); return; }
+                    if (damagedLeggings == null) { finishGameWithError("Could not find damaged leggings slot 38 in loadout " + loadoutName + " with team " + teamName); return; }
+                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(leggings));
+                    hit.getInventory().setLeggings(damagedLeggings);
+                    hit.getInventory().setItem(7, damagedLeggings);
+                    break;
+                case 0:
+                    hit.getInventory().clear();
+                    if (!testGameEnd()) {
+                        hit.sendMessage("§4§lYou have been eliminated!");
+                        hit.teleport((Location) getVariable("spectate-lobby"));
+                    }
+                    break;
             }
         }
     }
@@ -256,39 +254,54 @@ public class Paintball extends Game {
         p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
     }
 
+    private void finishGameWithError(String error) {
+        this.error = error;
+        finishGame(new ArrayList<>(state.keySet()));
+    }
+
     @Override
     public void onGameFinish(List<Player> players) {
         Bukkit.getScheduler().cancelTask(rechargeZoneChecker);
         rechargeZoneChecker = 0;
 
-        int remainingTeam = -1;
-        Player remainingPlayer = null;
-
-        if (teams.size() > 1) {
-            for (int rt : remainingTeams()) { remainingTeam = rt; }
-            if (remainingTeam < 0) { return; }
+        if (error != null) {
+            GameUtils.messagePlayerList(players, "§c§lERROR: §c" + error);
+        } else if (teams.size() > 1) {
+            finishTeamGame(players);
         } else {
-            // ffa game
-            remainingTeam = 0;
-            for (Player player : remainingPlayers()) { remainingPlayer = player; }
-            if (remainingPlayer == null) { return; }
+            finishFFAGame(players);
         }
-        ChatColor chatColor = (ChatColor) teams.get(remainingTeam).get("chat-color");
-        if (teams.size() == 1) {
-            for (Player player : players) {
-                player.sendMessage(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
-                sendStatistics(player);
-                player.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
-            }
-        } else {
-            String teamName = (String) teams.get(remainingTeam).get("name");
-            for (Player player : players) {
-                player.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
-                sendStatistics(player);
-                player.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
-            }
-        }
+        error = null;
         state.clear();
+        players.forEach(p -> p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR));
+    }
+
+    private void finishFFAGame(List<Player> players) {
+        Player remainingPlayer = null;
+        // ffa game
+        for (Player player : remainingPlayers()) { remainingPlayer = player; }
+        if (remainingPlayer == null) { return; }
+
+        ChatColor chatColor = (ChatColor) teams.get(0).get("chat-color");
+
+        for (Player player : players) {
+            player.sendMessage(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
+            sendStatistics(player);
+        }
+    }
+
+    private void finishTeamGame(List<Player> players) {
+        int remainingTeam = -1;
+        for (int rt : remainingTeams()) { remainingTeam = rt; }
+        if (remainingTeam < 0) { return; }
+
+        ChatColor chatColor = (ChatColor) teams.get(remainingTeam).get("chat-color");
+
+        String teamName = (String) teams.get(remainingTeam).get("name");
+        for (Player player : players) {
+            player.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
+            sendStatistics(player);
+        }
     }
 
     private void sendStatistics(Player player) {
