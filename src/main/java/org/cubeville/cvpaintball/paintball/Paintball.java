@@ -8,6 +8,7 @@ import org.bukkit.entity.Snowball;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scoreboard.*;
@@ -18,7 +19,6 @@ import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
 import org.cubeville.cvloadouts.CVLoadouts;
 import org.cubeville.cvpaintball.CVPaintball;
-import org.cubeville.cvpaintball.PBUtils;
 
 import java.util.*;
 
@@ -75,10 +75,10 @@ public class Paintball extends Game {
 
                 CVLoadouts.getInstance().applyLoadoutToPlayer(player,
                         (String) getVariable("loadout-name"),
-                        Set.of((String) team.get("loadout-team"))
+                        List.of((String) team.get("loadout-team"))
                 );
 
-                Location tpLoc = tps.get(j);
+                Location tpLoc = tps.get(j % tps.size());
                 if (!tpLoc.getChunk().isLoaded()) {
                     tpLoc.getChunk().load();
                 }
@@ -142,7 +142,7 @@ public class Paintball extends Game {
         ItemStack snowballs = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 0);
 
         if (snowballs == null) { finishGameWithError("Could not find snowballs in slot 0 in loadout " + loadoutName + " with team " + teamName); return; }
-        PBUtils.clearItemsFromInventory(player.getInventory(), List.of(snowballs));
+        GameUtils.clearItemsFromInventory(player.getInventory(), List.of(snowballs));
         inv.setItem(0, snowballs);
     }
 
@@ -177,31 +177,28 @@ public class Paintball extends Game {
 
             switch (hitState.health) {
                 case 3:
-                    ItemStack helmet = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 45);
+                    ItemStack damagedItemHelmet = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 40);
                     ItemStack damagedHelmet = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 36);
-                    if (helmet == null) { finishGameWithError("Could not find helmet in helmet slot in loadout " + loadoutName + " with team " + teamName); return; }
+                    if (damagedItemHelmet == null) { finishGameWithError("Could not find damaged item in slot 40 in loadout " + loadoutName + " with team " + teamName); return; }
                     if (damagedHelmet == null) { finishGameWithError("Could not find damaged helmet slot 36 in loadout " + loadoutName + " with team " + teamName); return; }
-                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(helmet));
                     hit.getInventory().setHelmet(damagedHelmet);
-                    hit.getInventory().setItem(5, damagedHelmet);
+                    hit.getInventory().setItem(5, damagedItemHelmet);
                     break;
                 case 2:
-                    ItemStack chest = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 46);
+                    ItemStack damagedItemChest = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 41);
                     ItemStack damagedChest = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 37);
-                    if (chest == null) { finishGameWithError("Could not find chestplate in chestplate slot in loadout " + loadoutName + " with team " + teamName); return; }
+                    if (damagedItemChest == null) { finishGameWithError("Could not find damaged item in slot 41 in loadout " + loadoutName + " with team " + teamName); return; }
                     if (damagedChest == null) { finishGameWithError("Could not find damaged chestplate slot 37 in loadout " + loadoutName + " with team " + teamName); return; }
-                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(chest));
                     hit.getInventory().setChestplate(damagedChest);
-                    hit.getInventory().setItem(6, damagedChest);
+                    hit.getInventory().setItem(6, damagedItemChest);
                     break;
                 case 1:
-                    ItemStack leggings = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 47);
+                    ItemStack damagedItemLeggings = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 42);
                     ItemStack damagedLeggings = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 38);
-                    if (leggings == null) { finishGameWithError("Could not find leggings in leggings slot in loadout " + loadoutName + " with team " + teamName); return; }
+                    if (damagedItemLeggings == null) { finishGameWithError("Could not find damaged item in slot 42 in loadout " + loadoutName + " with team " + teamName); return; }
                     if (damagedLeggings == null) { finishGameWithError("Could not find damaged leggings slot 38 in loadout " + loadoutName + " with team " + teamName); return; }
-                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(leggings));
                     hit.getInventory().setLeggings(damagedLeggings);
-                    hit.getInventory().setItem(7, damagedLeggings);
+                    hit.getInventory().setItem(7, damagedItemLeggings);
                     break;
                 case 0:
                     hit.getInventory().clear();
@@ -220,8 +217,6 @@ public class Paintball extends Game {
         PaintballState pbs = state.get((Player) event.getEntity().getShooter());
         if (pbs == null) return;
         Double cooldown = (Double) getVariable("fire-cooldown");
-        System.out.println(cooldown);
-        System.out.println(pbs.lastFire != null ? (System.currentTimeMillis() - pbs.lastFire) : "null");
 
         if (pbs.lastFire != null && (System.currentTimeMillis() - pbs.lastFire) <= (cooldown * 1000L)) {
             // don't fire too fast
@@ -287,6 +282,17 @@ public class Paintball extends Game {
         for (Player player : players) {
             player.sendMessage(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
             sendStatistics(player);
+        }
+    }
+
+    @EventHandler
+    public void onInventoryClick(InventoryClickEvent event) {
+        // prevent anyone in the game from moving stuff around their inventory
+        if (event.getWhoClicked() instanceof Player) {
+            Player player = (Player) event.getWhoClicked();
+            if (state.containsKey(player)) {
+                event.setCancelled(true);
+            }
         }
     }
 

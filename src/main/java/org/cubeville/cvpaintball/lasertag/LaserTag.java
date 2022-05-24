@@ -1,28 +1,26 @@
 package org.cubeville.cvpaintball.lasertag;
 
 import net.md_5.bungee.api.ChatColor;
-import net.md_5.bungee.api.chat.hover.content.Item;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.scoreboard.*;
-import org.cubeville.cvgames.CVGames;
-import org.cubeville.cvgames.models.Arena;
 import org.cubeville.cvgames.models.Game;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
 import org.cubeville.cvloadouts.CVLoadouts;
 import org.cubeville.cvpaintball.CVPaintball;
-import org.cubeville.cvpaintball.PBUtils;
 import org.cubeville.effects.pluginhook.PluginHookEventReceiver;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class LaserTag extends Game implements PluginHookEventReceiver {
 
@@ -38,15 +36,19 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
 
     public LaserTag(String id) {
         super(id);
-        addGameVariable("spectate-lobby", new GameVariableLocation());
         addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class));
         addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
         addGameVariable("teams", new GameVariableList<>(LaserTagTeam.class));
         addGameVariable("region", new GameVariableRegion());
         addGameVariable("duration", new GameVariableInt(), 5);
         addGameVariable("max-score", new GameVariableInt(), 20);
-        addGameVariable("invin-duration", new GameVariableInt(), 2);
+        addGameVariable("invuln-duration", new GameVariableInt(), 2);
         addGameVariable("loadout-name", new GameVariableString());
+        addGameVariable("invuln1-loadout-team", new GameVariableString());
+        addGameVariable("invuln2-loadout-team", new GameVariableString());
+        addGameVariable("invuln-shooting", new GameVariableFlag(), false);
+
+
     }
 
     @Override
@@ -83,10 +85,10 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
 
                 CVLoadouts.getInstance().applyLoadoutToPlayer(player,
                         (String) getVariable("loadout-name"),
-                        Set.of((String) team.get("loadout-team"))
+                        Arrays.asList(((String) team.get("loadout-team")).split(";"))
                 );
 
-                Location tpLoc = tps.get(j);
+                Location tpLoc = tps.get(j % tps.size());
                 if (!tpLoc.getChunk().isLoaded()) {
                     tpLoc.getChunk().load();
                 }
@@ -113,7 +115,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
                         if (lastRecharge == null || System.currentTimeMillis() - lastRecharge > (cooldown * 1000L)) {
                             playerState.lastRecharge = System.currentTimeMillis();
                             player.sendMessage("§b§lAmmo Recharged! §f§o(Cooldown: " + cooldown + " seconds)");
-                            resetPlayerGun(player);
+                            reloadPlayerGun(player);
                         }
                     }
                 }
@@ -135,17 +137,17 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         updateScoreboard();
     }
 
-    private void resetPlayerGun(Player player) {
+    private void reloadPlayerGun(Player player) {
         HashMap<String, Object> team = teams.get(state.get(player).team);
         PlayerInventory inv = player.getInventory();
         // Get the first item
         String loadoutName = (String) getVariable("loadout-name");
-        String teamName = (String) team.get("loadout-team");
+        String teamName = ((String) team.get("loadout-team")).split(";")[0];
         ItemStack laserGun = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 0);
 
         if (laserGun == null) { finishGameWithError("Could not find a laser gun in slot 0 of loadout " + loadoutName + " with team " + teamName); return; }
 
-        PBUtils.clearItemsFromInventory(inv, List.of(laserGun));
+        GameUtils.clearItemsFromInventory(inv, List.of(laserGun));
         inv.addItem(laserGun);
     }
 
@@ -157,10 +159,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         Bukkit.getScheduler().cancelTask(state.get(p).armorFlashID);
         state.get(p).armorFlashID = -1;
         state.remove(p);
-        if (state.size() <= 1) { finishGame(new ArrayList<>(state.keySet())); }
-        if (teamScores.stream().filter(score -> score != -1).count() <= 1) {
-            finishGame(new ArrayList<>(state.keySet()));
-        }
+        if (state.size() <= 1 || teamScores.stream().filter(score -> score != -1).count() <= 1) { finishGame(new ArrayList<>(state.keySet())); }
         p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
     }
 
@@ -178,11 +177,10 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     @Override
     public void onGameFinish(List<Player> players) {
         for (Player player : players) {
-            if (state.get(player).armorFlashID != -1) {
+            if (state.containsKey(player) && state.get(player).armorFlashID != -1) {
                 Bukkit.getScheduler().cancelTask(state.get(player).armorFlashID);
                 state.get(player).armorFlashID = -1;
             }
-            player.getInventory().clear();
         }
 
         Bukkit.getScheduler().cancelTask(rechargeZoneScheduler);
@@ -190,8 +188,10 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         Bukkit.getScheduler().cancelTask(scoreboardSecondUpdater);
         scoreboardSecondUpdater = -1;
 
-        CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
-        gameCollisionHook = null;
+        if (gameCollisionHook != null) {
+            CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
+            gameCollisionHook = null;
+        }
 
         if (error != null) {
             GameUtils.messagePlayerList(players, "§c§lERROR: §c" + error);
@@ -343,6 +343,17 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         finishGame(new ArrayList<>(state.keySet()));
     }
 
+    @EventHandler
+    public void onInventoryClick(InventoryClickEvent event) {
+        // prevent anyone in the game from moving stuff around their inventory
+        if (event.getWhoClicked() instanceof Player) {
+            Player player = (Player) event.getWhoClicked();
+            if (state.containsKey(player)) {
+                event.setCancelled(true);
+            }
+        }
+    }
+
     @Override
     public void onEntityCollisionEvent(Player attacker, Entity entity) {
         LaserTagState attackerState = state.get(attacker);
@@ -365,6 +376,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             hitState.timesHit += 1;
             hitState.lastHit = System.currentTimeMillis();
             hitState.isInvulnerable = true;
+            hitState.laserGun = hit.getInventory().getItem(0);
             teamScores.set(attackerState.team, teamScores.get(attackerState.team) + 1);
 
             if (teams.size() > 1) {
@@ -379,44 +391,30 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
                 }
             }
 
-            long invinDuration = ((int) getVariable("invin-duration") * 1000L);
+            long invunlDuration = ((int) getVariable("invuln-duration") * 1000L);
             String loadoutName = (String) getVariable("loadout-name");
-            String teamName = (String) teams.get(hitState.team).get("loadout-team");
-            CVLoadouts loadouts = CVLoadouts.getInstance();
-            ItemStack healthyItem = loadouts.getLoadoutItem(loadoutName, teamName, 8);
-            ItemStack healthyArmor = loadouts.getLoadoutItem(loadoutName, teamName, 46);
-            ItemStack blink1 = loadouts.getLoadoutItem(loadoutName, teamName, 36);
-            ItemStack blink2 = loadouts.getLoadoutItem(loadoutName, teamName, 37);
-            ItemStack blinkArmor1 = loadouts.getLoadoutItem(loadoutName, teamName, 38);
-            ItemStack blinkArmor2 = loadouts.getLoadoutItem(loadoutName, teamName, 39);
-
-            if (healthyItem == null) { finishGameWithError("No healthy item at index 8 of loadout " + loadoutName + " with team " + teamName); return; }
-            if (healthyArmor == null) { finishGameWithError("No healthy chestplate in the chestplate slot of loadout " + loadoutName + " with team " + teamName); return; }
-            if (blink1 == null) { finishGameWithError("No blink item at index 36 of loadout " + loadoutName + " with team " + teamName); return; }
-            if (blink2 == null) { finishGameWithError("No blink item at index 37 of loadout " + loadoutName + " with team " + teamName); return; }
-            if (blinkArmor1 == null) { finishGameWithError("No blink chestplate at index 38 of loadout " + loadoutName + " with team " + teamName); return; }
-            if (blinkArmor2 == null) { finishGameWithError("No blink chestplate at index 39 of loadout " + loadoutName + " with team " + teamName); return; }
-            PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(healthyItem, healthyArmor));
+            List<String> teamLoadouts = Arrays.asList(((String) teams.get(hitState.team).get("loadout-team")).split(";"));
 
             hitState.armorFlashID = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
                 LaserTagState playerState = state.get(hit);
-                if (System.currentTimeMillis() - playerState.lastHit > invinDuration) {
-                    PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(blink1, blink2, blinkArmor1, blinkArmor2));
-                    hit.getInventory().setChestplate(healthyArmor);
-                    hit.getInventory().setItem(8, healthyItem);
+                if (System.currentTimeMillis() - playerState.lastHit > invunlDuration) {
+                    CVLoadouts.getInstance().applyLoadoutToPlayer(hit, loadoutName, teamLoadouts);
+                    if (!((Boolean) getVariable("invuln-shooting"))) {
+                        hit.getInventory().setItem(0, playerState.laserGun);
+                    }
                     playerState.isInvulnerable = false;
                     Bukkit.getScheduler().cancelTask(playerState.armorFlashID);
                     playerState.armorFlashID = -1;
                     playerState.flashingFirstColor = true;
                 } else {
                     if (playerState.flashingFirstColor) {
-                        PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(blink1, blinkArmor1));
-                        hit.getInventory().setItem(8, blink2);
-                        hit.getInventory().setChestplate(blinkArmor2);
+                        List<String> invuln1Loadouts = Arrays.asList(((String) getVariable("invuln1-loadout-team")).split(";"));
+                        CVLoadouts.getInstance().applyLoadoutToPlayer(hit, loadoutName,
+                                Stream.of(invuln1Loadouts, teamLoadouts).flatMap(Collection::stream).collect(Collectors.toList()));
                     } else {
-                        PBUtils.clearItemsFromInventory(hit.getInventory(), List.of(blink2, blinkArmor2));
-                        hit.getInventory().setItem(8, blink1);
-                        hit.getInventory().setChestplate(blinkArmor1);
+                        List<String> invuln2Loadouts = Arrays.asList(((String) getVariable("invuln2-loadout-team")).split(";"));
+                        CVLoadouts.getInstance().applyLoadoutToPlayer(hit, loadoutName,
+                                Stream.of(invuln2Loadouts, teamLoadouts).flatMap(Collection::stream).collect(Collectors.toList()));
                     }
                     playerState.flashingFirstColor = !playerState.flashingFirstColor;
                 }
