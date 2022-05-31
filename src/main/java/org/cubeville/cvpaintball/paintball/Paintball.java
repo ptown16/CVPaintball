@@ -49,6 +49,9 @@ public class Paintball extends Game {
         addGameVariable("invuln1-loadout-team", new GameVariableString());
         addGameVariable("invuln2-loadout-team", new GameVariableString());
         addGameVariable("invuln-shooting", new GameVariableFlag(), false);
+        addGameVariable("infinite-ammo", new GameVariableFlag(), false);
+
+
     }
 
     @Override
@@ -155,7 +158,6 @@ public class Paintball extends Game {
         ItemStack snowballs = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 0);
 
         if (snowballs == null) { finishGameWithError("Could not find snowballs in slot 0 in loadout " + loadoutName + " with team " + teamName); return; }
-        GameUtils.clearItemsFromInventory(player.getInventory(), List.of(snowballs));
         inv.setItem(0, snowballs);
     }
 
@@ -266,6 +268,11 @@ public class Paintball extends Game {
             event.setCancelled(true);
             return;
         }
+
+        if ((Boolean) getVariable("infinite-ammo")) {
+            resetPlayerSnowballs((Player) event.getEntity().getShooter());
+        }
+
         pbs.lastFire = System.currentTimeMillis();
         pbs.timesFired += 1;
     }
