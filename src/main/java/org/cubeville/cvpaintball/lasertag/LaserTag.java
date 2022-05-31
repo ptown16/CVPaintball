@@ -1,5 +1,6 @@
 package org.cubeville.cvpaintball.lasertag;
 
+import com.ibm.icu.impl.Pair;
 import net.md_5.bungee.api.ChatColor;
 import org.bukkit.*;
 import org.bukkit.block.Block;
@@ -27,7 +28,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     private int rechargeZoneScheduler, scoreboardSecondUpdater;
     private String error;
     private final HashMap<Player, LaserTagState> state = new HashMap<>();
-    private final ArrayList<Integer> teamScores = new ArrayList<>();
+    private final ArrayList<Integer[]> teamScores = new ArrayList<>();
     private long startTime = 0;
     private long currentTime;
 
@@ -47,8 +48,6 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         addGameVariable("invuln1-loadout-team", new GameVariableString());
         addGameVariable("invuln2-loadout-team", new GameVariableString());
         addGameVariable("invuln-shooting", new GameVariableFlag(), false);
-
-
     }
 
     @Override
@@ -77,7 +76,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             ChatColor chatColor = (ChatColor) team.get("chat-color");
             List<Location> tps = (List<Location>) team.get("tps");
 
-            teamScores.add(0);
+            teamScores.add(new Integer[]{ i, 0 });
 
             int j = 0;
             for (Player player : teamPlayers) {
@@ -98,6 +97,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
                 } else {
                     player.sendMessage(chatColor + "It's a free for all!");
                 }
+                player.sendMessage(chatColor + "First to " + getVariable("max-score") + " points wins!");
                 j++;
             }
         }
@@ -110,7 +110,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
                 LaserTagState playerState = state.get(player);
                 // check recharge
                 for (GameRegion rechargeZone : rechargeZones) {
-                    if (rechargeZone.containsPlayer(player)) {
+                    if (rechargeZone.containsPlayer(player) && !state.get(player).isInvulnerable) {
                         Long lastRecharge = playerState.lastRecharge;
                         if (lastRecharge == null || System.currentTimeMillis() - lastRecharge > (cooldown * 1000L)) {
                             playerState.lastRecharge = System.currentTimeMillis();
@@ -129,12 +129,24 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             currentTime = duration - (System.currentTimeMillis() - startTime);
             if (currentTime > 0) {
                 updateScoreboard();
+                int seconds = ((int) currentTime / 1000);
+                if (seconds == 30) {
+                    sendTimeTitle("§b30 seconds remain");
+                } else if (seconds == 60) {
+                    sendTimeTitle("§b1 minute remains");
+                } else if (seconds == 180) {
+                    sendTimeTitle("§b3 minutes remain");
+                }
             } else {
                 finishGame(new ArrayList<>(state.keySet()));
             }
         }, 0L, 20L);
 
         updateScoreboard();
+    }
+
+    private void sendTimeTitle(String title) {
+        state.keySet().forEach(player -> player.sendTitle("", title, 2, 56, 2));
     }
 
     private void reloadPlayerGun(Player player) {
@@ -154,12 +166,12 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     @Override
     public void onPlayerLogout(Player p) {
         if (isLastOnTeam(p)) {
-            teamScores.set(state.get(p).team, -1);
+            teamScores.set(state.get(p).team, new Integer[]{state.get(p).team, -1});
         }
         Bukkit.getScheduler().cancelTask(state.get(p).armorFlashID);
         state.get(p).armorFlashID = -1;
         state.remove(p);
-        if (state.size() <= 1 || teamScores.stream().filter(score -> score != -1).count() <= 1) { finishGame(new ArrayList<>(state.keySet())); }
+        if (state.size() <= 1 || teamScores.stream().filter(score -> score[1] != -1).count() <= 1) { finishGame(new ArrayList<>(state.keySet())); }
         p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
     }
 
@@ -188,10 +200,12 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         Bukkit.getScheduler().cancelTask(scoreboardSecondUpdater);
         scoreboardSecondUpdater = -1;
 
-        if (gameCollisionHook != null) {
-            CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
-            gameCollisionHook = null;
-        }
+        Bukkit.getScheduler().runTaskLater(CVPaintball.getInstance(), () -> {
+            if (gameCollisionHook != null) {
+                CVPaintball.getFXPlugin().getPluginHookManager().unhook(gameCollisionHook);
+                gameCollisionHook = null;
+            }
+        }, 100L);
 
         if (error != null) {
             GameUtils.messagePlayerList(players, "§c§lERROR: §c" + error);
@@ -206,74 +220,63 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
     }
 
     private void finishFFAGame(List<Player> players) {
-        List<Player> topPlayers = new ArrayList<>();
-        for (Player player : players) {
-            if (topPlayers.size() == 0) {
-                topPlayers.add(player);
-                continue;
-            }
-            int maxScore = state.get(topPlayers.get(0)).points;
-            if (maxScore < state.get(player).points) {
-                topPlayers = List.of(player);
-            } else if (maxScore == state.get(player).points) {
-                topPlayers.add(player);
-            }
-        }
+        List<Player> sortedPlayers  = state.keySet().stream().sorted(Comparator.comparingInt(o -> -1 * state.get(o).points)).collect(Collectors.toList());
 
         ChatColor chatColor = (ChatColor) teams.get(0).get("chat-color");
-        List<Player> finalTopPlayers = topPlayers;
 
-
-        if (finalTopPlayers.size() != 1) {
+        if (sortedPlayers.size() > 1 && state.get(sortedPlayers.get(0)).points == state.get(sortedPlayers.get(1)).points) {
             players.forEach(p -> {
-                String output = "";
-                output += chatColor;
-                for (int i = 0; i < finalTopPlayers.size(); i++) {
-                    if (i == (finalTopPlayers.size() - 1)) {
-                        output += ", " + finalTopPlayers.get(i).getDisplayName();
+                StringBuilder output = new StringBuilder();
+                output.append(chatColor);
+                for (int i = 0; i < sortedPlayers.size(); i++) {
+                    if (i == (sortedPlayers.size() - 1) || state.get(sortedPlayers.get(i)).points != state.get(sortedPlayers.get(i + 1)).points) {
+                        output.append(" and ").append(sortedPlayers.get(i).getDisplayName());
+                        break;
                     } else if (i == 0) {
-                        output += finalTopPlayers.get(i).getDisplayName();
+                        output.append(sortedPlayers.get(i).getDisplayName());
                     } else {
-                        output += "and " + finalTopPlayers.get(i).getDisplayName();
+                        output.append(", ").append(sortedPlayers.get(i).getDisplayName());
                     }
                 }
-                output += " win the game!";
-                p.sendMessage(output);
-                playerPostGame(p);
+                output.append(" win the game!");
+                p.sendMessage(output.toString());
             });
-            return;
+        } else {
+            players.forEach(p -> {
+                p.sendMessage(chatColor + sortedPlayers.get(0).getDisplayName() + " has won the game!");
+            });
         }
 
         players.forEach(p -> {
-            p.sendMessage(chatColor + finalTopPlayers.get(0).getDisplayName() + " has won the game!");
+            p.sendMessage("§b§l--- FINAL RESULTS ---");
+            sortedPlayers.forEach(player -> {
+                p.sendMessage(chatColor + player.getDisplayName() + "§f: " + state.get(player).points + " points");
+            });
             playerPostGame(p);
         });
     }
 
 
     private void finishTeamGame(List<Player> players) {
-        List<Integer> topTeams = new ArrayList<>(List.of(0));
-        for (int i = 1; i < teamScores.size(); i++) {
-            int maxScore = teamScores.get(topTeams.get(0));
-            if (maxScore < teamScores.get(i)) {
-                topTeams = List.of(i);
-            } else if (maxScore == teamScores.get(i)) {
-                topTeams.add(i);
-            }
-        }
-
-        if (topTeams.size() != 1) {
+        List<Integer[]> sortedTeams = teamScores.stream().sorted(Comparator.comparingInt(o -> -1 * teamScores.get(0)[1])).collect(Collectors.toList());
+        if (Objects.equals(sortedTeams.get(0)[1], sortedTeams.get(1)[1])) {
             players.forEach(p -> {
                 p.sendMessage("§f§lTie Game!");
-                playerPostGame(p);
             });
-            return;
+        } else {
+            String teamName = (String) teams.get(sortedTeams.get(0)[0]).get("name");
+            ChatColor chatColor = (ChatColor) teams.get(sortedTeams.get(0)[0]).get("chat-color");
+            players.forEach(p -> {
+                p.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
+            });
         }
-
-        String teamName = (String) teams.get(topTeams.get(0)).get("name");
-        ChatColor chatColor = (ChatColor) teams.get(topTeams.get(0)).get("chat-color");
         players.forEach(p -> {
-            p.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
+            p.sendMessage("§b§l--- FINAL RESULTS ---");
+            sortedTeams.forEach(pair -> {
+                String teamName = (String) teams.get(pair[0]).get("name");
+                ChatColor chatColor = (ChatColor) teams.get(pair[0]).get("chat-color");
+                p.sendMessage(chatColor + teamName + "§f: " + pair[1] + " points");
+            });
             playerPostGame(p);
         });
     }
@@ -319,7 +322,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
         } else {
             for (int i = 0; i < teamScores.size(); i++) {
                 String line = teams.get(i).get("name") + "§f: ";
-                line += teamScores.get(i);
+                line += teamScores.get(i)[1];
                 line += " points";
                 scoreboardLines.add(line);
             }
@@ -377,15 +380,16 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             hitState.lastHit = System.currentTimeMillis();
             hitState.isInvulnerable = true;
             hitState.laserGun = hit.getInventory().getItem(0);
-            teamScores.set(attackerState.team, teamScores.get(attackerState.team) + 1);
+            teamScores.set(attackerState.team, new Integer[]{ attackerState.team, teamScores.get(attackerState.team)[1] + 1 });
 
+            int maxScore = (int) getVariable("max-score");
             if (teams.size() > 1) {
-                if (teamScores.get(attackerState.team) >= (int) getVariable("max-score")) {
+                if (teamScores.get(attackerState.team)[1] >= maxScore) {
                     finishGame(new ArrayList<>(state.keySet()));
                     return;
                 }
             } else {
-                if (attackerState.points >= (int) getVariable("max-score")) {
+                if (attackerState.points >= maxScore) {
                     finishGame(new ArrayList<>(state.keySet()));
                     return;
                 }
