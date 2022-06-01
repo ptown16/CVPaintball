@@ -18,7 +18,6 @@ import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
 import org.cubeville.cvloadouts.CVLoadouts;
 import org.cubeville.cvpaintball.CVPaintball;
-import org.cubeville.cvpaintball.lasertag.LaserTagState;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -30,7 +29,7 @@ public class Paintball extends Game {
     private String error;
     private final HashMap<Player, PaintballState> state = new HashMap<>();
     private List<HashMap<String, Object>> teams;
-    private Integer teamHealth;
+    private Integer maxHealth;
     private final String[] healthColorCodes = {
             "§7§o", "§c", "§6", "§e", "§a"
     };
@@ -63,9 +62,10 @@ public class Paintball extends Game {
             teamKeys.add(Integer.toString(i));
             percentages.add(1.0F / ((float) teams.size()));
         }
-
-
         Map<String, List<Player>> teamsMap = GameUtils.divideTeams(players, teamKeys, percentages);
+
+        maxHealth = (((List<String>) teams.get(0).get("damaged-teams")).size() * 4);
+
 
         for (int i = 0; i < teams.size(); i++) {
             HashMap<String, Object> team = teams.get(i);
@@ -77,13 +77,9 @@ public class Paintball extends Game {
             ChatColor chatColor = (ChatColor) team.get("chat-color");
             List<Location> tps = (List<Location>) team.get("tps");
 
-            int health = (((List<String>) team.get("damaged-teams")).size() * 4);
-            if (teamHealth == null) { teamHealth = health; }
-            if (teamHealth != health) { finishGameWithError("The number of items in \"damaged-teams\" is not the same on team 1 as team " + (i + 1));}
-
             int j = 0;
             for (Player player : teamPlayers) {
-                state.put(player, new PaintballState(i, health));
+                state.put(player, new PaintballState(i, maxHealth));
 
                 player.getInventory().clear();
 
@@ -199,29 +195,36 @@ public class Paintball extends Game {
             updateScoreboard();
 
             String loadoutName = (String) getVariable("loadout-name");
-            int replacingSlot = hitState.health % 4;
-            String damagedTeam = ((List<String>) teams.get(hitState.team).get("damaged-teams")).get(hitState.health / 4);
-            ItemStack damagedArmor = CVLoadouts.getInstance().getLoadoutItem(loadoutName, damagedTeam, 48 - replacingSlot);
-            ItemStack damagedItem = CVLoadouts.getInstance().getLoadoutItem(loadoutName, damagedTeam, 39 - replacingSlot);
-            if (damagedArmor == null) { finishGameWithError("Could not find damaged armor in slot " + (48 - replacingSlot) + " in loadout " + loadoutName + " with team " + damagedTeam); return; }
+            int replacingSlot = (maxHealth - (hitState.health + 1)) % 4;
+            try {
+                String damagedTeam = ((ArrayList<String>) teams.get(hitState.team).get("damaged-teams")).get((maxHealth - (hitState.health + 1)) / 4);
+                ItemStack damagedArmor = CVLoadouts.getInstance().getLoadoutItem(loadoutName, damagedTeam, 45 + replacingSlot);
+                ItemStack damagedItem = CVLoadouts.getInstance().getLoadoutItem(loadoutName, damagedTeam, 36 + replacingSlot);
+                if (damagedArmor == null) {
+                    finishGameWithError("Could not find damaged armor in slot " + (45 + replacingSlot) + " in loadout " + loadoutName + " with team " + damagedTeam);
+                    return;
+                }
 
-            switch (replacingSlot) {
-                case 3:
-                    hit.getInventory().setHelmet(damagedArmor);
-                    hit.getInventory().setItem(5, damagedItem);
-                    break;
-                case 2:
-                    hit.getInventory().setChestplate(damagedArmor);
-                    hit.getInventory().setItem(6, damagedItem);
-                    break;
-                case 1:
-                    hit.getInventory().setLeggings(damagedArmor);
-                    hit.getInventory().setItem(7, damagedItem);
-                    break;
-                case 0:
-                    hit.getInventory().setBoots(damagedArmor);
-                    hit.getInventory().setItem(8, damagedItem);
-                    break;
+                switch (replacingSlot) {
+                    case 0:
+                        hit.getInventory().setHelmet(damagedArmor);
+                        hit.getInventory().setItem(5, damagedItem);
+                        break;
+                    case 1:
+                        hit.getInventory().setChestplate(damagedArmor);
+                        hit.getInventory().setItem(6, damagedItem);
+                        break;
+                    case 2:
+                        hit.getInventory().setLeggings(damagedArmor);
+                        hit.getInventory().setItem(7, damagedItem);
+                        break;
+                    case 3:
+                        hit.getInventory().setBoots(damagedArmor);
+                        hit.getInventory().setItem(8, damagedItem);
+                        break;
+                }
+            } catch (IndexOutOfBoundsException e) {
+                finishGameWithError("Could not find loadout when player was hit on team " + (hitState.team + 1));
             }
 
             hitState.inventoryContents = hit.getInventory().getContents();
