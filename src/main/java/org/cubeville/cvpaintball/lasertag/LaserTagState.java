@@ -6,7 +6,7 @@ import org.bukkit.inventory.ItemStack;
 import java.util.Set;
 
 public class LaserTagState {
-    Integer team;
+    int team;
     Long lastRecharge = null;
     Long lastHit = null;
     int timesFired, timesHit, points = 0;

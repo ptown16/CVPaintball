@@ -371,7 +371,7 @@ public class LaserTag extends Game implements PluginHookEventReceiver {
             if (hitState == null ) { return; }
 
             // if the player isn't shooting themselves or their teammate
-            if (hit.equals(attacker) || (hitState.team.equals(attackerState.team) && teams.size() > 1)) { return; }
+            if (hit.equals(attacker) || (hitState.team == attackerState.team && teams.size() > 1)) { return; }
 
             if (hitState.isInvulnerable) { return; }
 
