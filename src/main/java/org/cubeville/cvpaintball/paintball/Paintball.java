@@ -12,22 +12,22 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scoreboard.*;
-import org.cubeville.cvgames.models.Game;
+import org.cubeville.cvgames.models.TeamSelectorGame;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
 import org.cubeville.cvgames.vartypes.*;
 import org.cubeville.cvloadouts.CVLoadouts;
 import org.cubeville.cvpaintball.CVPaintball;
 
+import javax.annotation.Nullable;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class Paintball extends Game {
+public class Paintball extends TeamSelectorGame {
 
     int rechargeZoneChecker;
     private String error;
-    private final HashMap<Player, PaintballState> state = new HashMap<>();
     private List<HashMap<String, Object>> teams;
     private Integer maxHealth;
     private final String[] healthColorCodes = {
@@ -49,27 +49,23 @@ public class Paintball extends Game {
         addGameVariable("invuln2-loadout-team", new GameVariableString());
         addGameVariable("invuln-shooting", new GameVariableFlag(), false);
         addGameVariable("infinite-ammo", new GameVariableFlag(), false);
+        setTeamVariable("teams");
+    }
 
-
+    @Nullable
+    private PaintballState getState(Player p) {
+        if (state.get(p) == null || !(state.get(p) instanceof PaintballState)) return null;
+        return (PaintballState) state.get(p);
     }
 
     @Override
-    public void onGameStart(List<Player> players) {
+    public void onGameStart(List<Set<Player>> teamPlayersList) {
         teams = (List<HashMap<String, Object>>) getVariable("teams");
-        List<Float> percentages = new ArrayList<>();
-        List<String> teamKeys = new ArrayList<>();
-        for (int i = 0; i < teams.size(); i++) {
-            teamKeys.add(Integer.toString(i));
-            percentages.add(1.0F / ((float) teams.size()));
-        }
-        Map<String, List<Player>> teamsMap = GameUtils.divideTeams(players, teamKeys, percentages);
-
         maxHealth = (((List<String>) teams.get(0).get("damaged-teams")).size() * 4);
-
 
         for (int i = 0; i < teams.size(); i++) {
             HashMap<String, Object> team = teams.get(i);
-            List<Player> teamPlayers = teamsMap.get(Integer.toString(i));
+            Set<Player> teamPlayers = teamPlayersList.get(i);
 
             if (teamPlayers == null) { continue; }
 
@@ -109,10 +105,10 @@ public class Paintball extends Game {
         rechargeZoneChecker = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
             for (GameRegion rechargeZone : rechargeZones) {
                 for (Player player : state.keySet()) {
-                    if (rechargeZone.containsPlayer(player) && !state.get(player).isInvulnerable) {
-                        Long lastRecharge = state.get(player).lastRecharge;
+                    if (rechargeZone.containsPlayer(player) && !getState(player).isInvulnerable) {
+                        Long lastRecharge = getState(player).lastRecharge;
                         if (lastRecharge == null || System.currentTimeMillis() - lastRecharge > (cooldown * 1000L)) {
-                            state.get(player).lastRecharge = System.currentTimeMillis();
+                            getState(player).lastRecharge = System.currentTimeMillis();
                             player.sendMessage("§b§lAmmo Recharged! §f§o(Cooldown: " + cooldown + " seconds)");
                             resetPlayerSnowballs(player);
                         }
@@ -126,8 +122,9 @@ public class Paintball extends Game {
 
     private Set<Integer> remainingTeams() {
         Set<Integer> stillInGame = new HashSet<>();
-        for (PaintballState ps : state.values()) {
-            if (ps.health == 0 || stillInGame.contains(ps.team)) { continue; }
+        for (Player player : state.keySet()) {
+            PaintballState ps = getState(player);
+            if (ps == null || ps.health == 0 || stillInGame.contains(ps.team)) { continue; }
             stillInGame.add(ps.team);
         }
         return stillInGame;
@@ -136,15 +133,15 @@ public class Paintball extends Game {
     private Set<Player> remainingPlayers() {
         Set<Player> stillInGame = new HashSet<>();
         for (Player player : state.keySet()) {
-            PaintballState ps = state.get(player);
-            if (ps.health == 0) { continue; }
+            PaintballState ps = getState(player);
+            if (ps == null || ps.health == 0) { continue; }
             stillInGame.add(player);
         }
         return stillInGame;
     }
 
     private void resetPlayerSnowballs(Player player) {
-        HashMap<String, Object> team = teams.get(state.get(player).team);
+        HashMap<String, Object> team = teams.get(getState(player).team);
         PlayerInventory inv = player.getInventory();
 
         String loadoutName = (String) getVariable("loadout-name");
@@ -165,8 +162,8 @@ public class Paintball extends Game {
             Player hit = (Player) event.getHitEntity();
             Player attacker = (Player) s.getShooter();
 
-            PaintballState hitState = state.get(hit);
-            PaintballState attackerState = state.get(attacker);
+            PaintballState hitState = getState(hit);
+            PaintballState attackerState = getState(attacker);
 
             // return if either player is not in the game
             if (hitState == null || attackerState == null) { return; }
@@ -182,17 +179,19 @@ public class Paintball extends Game {
             hitState.lastHit = System.currentTimeMillis();
 
             attacker.sendMessage("§aYou have hit " + hit.getName() + "!");
-            //todo -- add sound when back on internet
+            attacker.playSound(attacker.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0F, 0.7F);
             hit.sendMessage("§cYou have been hit by " + attacker.getName() + "!");
+            hit.playSound(hit.getLocation(), Sound.ENTITY_BOAT_PADDLE_WATER, 1.0F, 1.2F);
+
+            updateScoreboard();
 
             if (hitState.health == 0) {
                 if (testGameEnd()) { return; }
-                hit.getInventory().clear();
                 hit.sendMessage("§4§lYou have been eliminated!");
+                hit.getInventory().clear();
                 hit.teleport((Location) getVariable("spectate-lobby"));
+                return;
             }
-
-            updateScoreboard();
 
             String loadoutName = (String) getVariable("loadout-name");
             int replacingSlot = (maxHealth - (hitState.health + 1)) % 4;
@@ -232,7 +231,7 @@ public class Paintball extends Game {
             List<String> teamLoadouts = Arrays.asList(((String) teams.get(hitState.team).get("loadout-team")).split(";"));
 
             hitState.armorFlashID = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
-                PaintballState playerState = state.get(hit);
+                PaintballState playerState = getState(hit);
                 if (System.currentTimeMillis() - playerState.lastHit > invunlDuration) {
                     for (int i = 0; i < playerState.inventoryContents.length; i++) {
                         // don't replace the snowballs in the first slot if you can shoot while invulnerable
@@ -262,7 +261,7 @@ public class Paintball extends Game {
     @EventHandler
     public void onProjectileLaunch(ProjectileLaunchEvent event) {
         if (!event.getEntityType().equals(EntityType.SNOWBALL) || !(event.getEntity().getShooter() instanceof Player)) return;
-        PaintballState pbs = state.get((Player) event.getEntity().getShooter());
+        PaintballState pbs = getState((Player) event.getEntity().getShooter());
         if (pbs == null) return;
         Double cooldown = (Double) getVariable("fire-cooldown");
 
@@ -283,12 +282,12 @@ public class Paintball extends Game {
     private boolean testGameEnd() {
         if (teams.size() == 1) {
             if (remainingPlayers().size() <= 1) {
-                finishGame(new ArrayList<>(state.keySet()));
+                finishGame();
                 return true;
             }
         } else {
             if (remainingTeams().size() <= 1) {
-                finishGame(new ArrayList<>(state.keySet()));
+                finishGame();
                 return true;
             }
         }
@@ -296,25 +295,27 @@ public class Paintball extends Game {
     }
 
     @Override
-    public void onPlayerLogout(Player p) {
+    public void onPlayerLeave(Player p) {
+        if (getState(p) != null) {
+            Bukkit.getScheduler().cancelTask(getState(p).armorFlashID);
+            getState(p).armorFlashID = -1;
+        }
+        p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
         state.remove(p);
         testGameEnd();
-        Bukkit.getScheduler().cancelTask(state.get(p).armorFlashID);
-        state.get(p).armorFlashID = -1;
-        p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR);
     }
 
     private void finishGameWithError(String error) {
         this.error = error;
-        finishGame(new ArrayList<>(state.keySet()));
+        finishGame();
     }
 
     @Override
-    public void onGameFinish(List<Player> players) {
-        for (Player player : players) {
-            if (state.containsKey(player) && state.get(player).armorFlashID != -1) {
-                Bukkit.getScheduler().cancelTask(state.get(player).armorFlashID);
-                state.get(player).armorFlashID = -1;
+    public void onGameFinish() {
+        for (Player player : state.keySet()) {
+            if (state.containsKey(player) && getState(player).armorFlashID != -1) {
+                Bukkit.getScheduler().cancelTask(getState(player).armorFlashID);
+                getState(player).armorFlashID = -1;
             }
         }
 
@@ -322,18 +323,17 @@ public class Paintball extends Game {
         rechargeZoneChecker = 0;
 
         if (error != null) {
-            GameUtils.messagePlayerList(players, "§c§lERROR: §c" + error);
+            GameUtils.messagePlayerList(state.keySet(), "§c§lERROR: §c" + error);
         } else if (teams.size() > 1) {
-            finishTeamGame(players);
+            finishTeamGame();
         } else {
-            finishFFAGame(players);
+            finishFFAGame();
         }
         error = null;
-        state.clear();
-        players.forEach(p -> p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR));
+        state.keySet().forEach(p -> p.getScoreboard().clearSlot(DisplaySlot.SIDEBAR));
     }
 
-    private void finishFFAGame(List<Player> players) {
+    private void finishFFAGame() {
         Player remainingPlayer = null;
         // ffa game
         for (Player player : remainingPlayers()) { remainingPlayer = player; }
@@ -341,7 +341,7 @@ public class Paintball extends Game {
 
         ChatColor chatColor = (ChatColor) teams.get(0).get("chat-color");
 
-        for (Player player : players) {
+        for (Player player : state.keySet()) {
             player.sendMessage(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
             sendStatistics(player);
         }
@@ -358,7 +358,7 @@ public class Paintball extends Game {
         }
     }
 
-    private void finishTeamGame(List<Player> players) {
+    private void finishTeamGame() {
         int remainingTeam = -1;
         for (int rt : remainingTeams()) { remainingTeam = rt; }
         if (remainingTeam < 0) { return; }
@@ -366,14 +366,14 @@ public class Paintball extends Game {
         ChatColor chatColor = (ChatColor) teams.get(remainingTeam).get("chat-color");
 
         String teamName = (String) teams.get(remainingTeam).get("name");
-        for (Player player : players) {
+        for (Player player : state.keySet()) {
             player.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
             sendStatistics(player);
         }
     }
 
     private void sendStatistics(Player player) {
-        PaintballState ps = state.get(player);
+        PaintballState ps = getState(player);
         player.sendMessage("§7Shots fired: §f" + ps.timesFired);
         player.sendMessage("§7Shots hit: §f" + ps.successfulShots);
         if (ps.timesFired == 0 || ps.successfulShots == 0) {
@@ -387,15 +387,15 @@ public class Paintball extends Game {
         Scoreboard scoreboard;
         if (teams.size() == 1) {
             ArrayList<String> scoreboardLines = new ArrayList<>();
-            state.keySet().stream().sorted(Comparator.comparingInt(o -> -1 * state.get(o).health)).forEach( p -> {
-                int health = state.get(p).health;
+            state.keySet().stream().sorted(Comparator.comparingInt(o -> -1 * getState(o).health)).forEach( p -> {
+                int health = getState(p).health;
                 scoreboardLines.add(healthColorCodes[Math.min(health, 4)] + p.getDisplayName() + "§f: " + health + " HP");
             });
             scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA Paintball", scoreboardLines);
         } else {
             HashMap<Integer, Integer> countPerTeam = new HashMap<>();
             for (Player p : remainingPlayers()) {
-                int team = state.get(p).team;
+                int team = getState(p).team;
                 if (!countPerTeam.containsKey(team)) {
                     countPerTeam.put(team, 1);
                 } else {
