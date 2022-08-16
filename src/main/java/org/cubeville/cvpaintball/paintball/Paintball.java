@@ -35,25 +35,30 @@ public class Paintball extends TeamSelectorGame {
     };
 
 
-    public Paintball(String id) {
-        super(id);
+    public Paintball(String id, String arenaName) {
+        super(id, arenaName);
         addGameVariable("spectate-lobby", new GameVariableLocation());
         addGameVariable("ammo", new GameVariableInt(), 16);
         addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class));
         addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
         addGameVariable("fire-cooldown", new GameVariableDouble(), 0.5);
-        addGameVariable("teams", new GameVariableList<>(PaintballTeam.class));
-        addGameVariable("loadout-name", new GameVariableString());
+        addGameVariableTeamsList(
+            new HashMap<>(){{
+                put("tps", new GameVariableList<>(GameVariableLocation.class));
+                put("loadout-team", new GameVariableString());
+                put("damaged-teams", new GameVariableList<>(GameVariableString.class));
+            }}
+        );
+        addGameVariable("loadout-paintball", new GameVariableString());
         addGameVariable("invuln-duration", new GameVariableInt(), 2);
         addGameVariable("invuln1-loadout-team", new GameVariableString());
         addGameVariable("invuln2-loadout-team", new GameVariableString());
         addGameVariable("invuln-shooting", new GameVariableFlag(), false);
         addGameVariable("infinite-ammo", new GameVariableFlag(), false);
-        setTeamVariable("teams");
     }
 
     @Nullable
-    private PaintballState getState(Player p) {
+    protected PaintballState getState(Player p) {
         if (state.get(p) == null || !(state.get(p) instanceof PaintballState)) return null;
         return (PaintballState) state.get(p);
     }
@@ -80,7 +85,7 @@ public class Paintball extends TeamSelectorGame {
                 player.getInventory().clear();
 
                 CVLoadouts.getInstance().applyLoadoutToPlayer(player,
-                        (String) getVariable("loadout-name"),
+                        (String) getVariable("loadout-paintball"),
                         List.of((String) team.get("loadout-team"))
                 );
 
@@ -144,7 +149,7 @@ public class Paintball extends TeamSelectorGame {
         HashMap<String, Object> team = teams.get(getState(player).team);
         PlayerInventory inv = player.getInventory();
 
-        String loadoutName = (String) getVariable("loadout-name");
+        String loadoutName = (String) getVariable("loadout-paintball");
         String teamName = (String) team.get("loadout-team");
 
 
@@ -178,11 +183,9 @@ public class Paintball extends TeamSelectorGame {
             attackerState.successfulShots += 1;
             hitState.lastHit = System.currentTimeMillis();
 
-            attacker.sendMessage("§aYou have hit " + hit.getName() + "!");
             attacker.playSound(attacker.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0F, 0.7F);
-            hit.sendMessage("§cYou have been hit by " + attacker.getName() + "!");
             hit.playSound(hit.getLocation(), Sound.ENTITY_BOAT_PADDLE_WATER, 1.0F, 1.2F);
-
+            sendMessageToArena(teams.get(attackerState.team).get("chat-color") + attacker.getDisplayName() + "§e has hit " + teams.get(hitState.team).get("chat-color") + hit.getDisplayName());
             updateScoreboard();
 
             if (hitState.health == 0) {
@@ -193,7 +196,7 @@ public class Paintball extends TeamSelectorGame {
                 return;
             }
 
-            String loadoutName = (String) getVariable("loadout-name");
+            String loadoutName = (String) getVariable("loadout-paintball");
             int replacingSlot = (maxHealth - (hitState.health + 1)) % 4;
             try {
                 String damagedTeam = ((ArrayList<String>) teams.get(hitState.team).get("damaged-teams")).get((maxHealth - (hitState.health + 1)) / 4);
@@ -323,7 +326,7 @@ public class Paintball extends TeamSelectorGame {
         rechargeZoneChecker = 0;
 
         if (error != null) {
-            GameUtils.messagePlayerList(state.keySet(), "§c§lERROR: §c" + error);
+            sendMessageToArena("§c§lERROR: §c" + error);
         } else if (teams.size() > 1) {
             finishTeamGame();
         } else {
@@ -341,8 +344,8 @@ public class Paintball extends TeamSelectorGame {
 
         ChatColor chatColor = (ChatColor) teams.get(0).get("chat-color");
 
+        sendMessageToArena(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
         for (Player player : state.keySet()) {
-            player.sendMessage(chatColor + "§l" + remainingPlayer.getDisplayName() + chatColor + "§l has won the game!");
             sendStatistics(player);
         }
     }
@@ -366,8 +369,8 @@ public class Paintball extends TeamSelectorGame {
         ChatColor chatColor = (ChatColor) teams.get(remainingTeam).get("chat-color");
 
         String teamName = (String) teams.get(remainingTeam).get("name");
+        sendMessageToArena(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
         for (Player player : state.keySet()) {
-            player.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
             sendStatistics(player);
         }
     }
@@ -391,7 +394,7 @@ public class Paintball extends TeamSelectorGame {
                 int health = getState(p).health;
                 scoreboardLines.add(healthColorCodes[Math.min(health, 4)] + p.getDisplayName() + "§f: " + health + " HP");
             });
-            scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA Paintball", scoreboardLines);
+            scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA paintball", scoreboardLines);
         } else {
             HashMap<Integer, Integer> countPerTeam = new HashMap<>();
             for (Player p : remainingPlayers()) {
@@ -420,8 +423,8 @@ public class Paintball extends TeamSelectorGame {
                 }
                 scoreboardLines.add(line);
             }
-            scoreboard = GameUtils.createScoreboard(arena, "§b§lTeam Paintball", scoreboardLines);
+            scoreboard = GameUtils.createScoreboard(arena, "§b§lTeam paintball", scoreboardLines);
         }
-        this.state.keySet().forEach(p -> p.setScoreboard(scoreboard));
+        sendScoreboardToArena(scoreboard);
     }
 }

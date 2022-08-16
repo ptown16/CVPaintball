@@ -34,24 +34,27 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
     private List<HashMap<String, Object>> teams;
     Integer gameCollisionHook;
 
-    public LaserTag(String id) {
-        super(id);
+    public LaserTag(String id, String arenaName) {
+        super(id, arenaName);
         addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class));
         addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
-        addGameVariable("teams", new GameVariableList<>(LaserTagTeam.class));
-        addGameVariable("region", new GameVariableRegion());
+        addGameVariableTeamsList(
+            new HashMap<>(){{
+                put("loadout-team", new GameVariableString());
+                put("tps", new GameVariableList<>(GameVariableLocation.class));
+            }}
+        );
         addGameVariable("duration", new GameVariableInt(), 5);
         addGameVariable("max-score", new GameVariableInt(), 20);
         addGameVariable("invuln-duration", new GameVariableInt(), 2);
-        addGameVariable("loadout-name", new GameVariableString());
+        addGameVariable("loadout-lasertag", new GameVariableString());
         addGameVariable("invuln1-loadout-team", new GameVariableString());
         addGameVariable("invuln2-loadout-team", new GameVariableString());
         addGameVariable("invuln-shooting", new GameVariableFlag(), false);
-        setTeamVariable("teams");
     }
 
     @Nullable
-    private LaserTagState getState(Player p) {
+    protected LaserTagState getState(Player p) {
         if (state.get(p) == null || !(state.get(p) instanceof LaserTagState)) return null;
         return (LaserTagState) state.get(p);
     }
@@ -81,7 +84,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
                 state.put(player, new LaserTagState(i));
 
                 CVLoadouts.getInstance().applyLoadoutToPlayer(player,
-                        (String) getVariable("loadout-name"),
+                        (String) getVariable("loadout-lasertag"),
                         Arrays.asList(((String) team.get("loadout-team")).split(";"))
                 );
 
@@ -126,7 +129,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
         scoreboardSecondUpdater = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
             currentTime = duration - (System.currentTimeMillis() - startTime);
             if (currentTime > 0) {
-                updateScoreboard();
+                updateDefaultScoreboard((int) currentTime, teamScores, "points");
                 int seconds = ((int) currentTime / 1000);
                 if (seconds == 30) {
                     sendTimeTitle("§b30 seconds remain");
@@ -140,7 +143,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
             }
         }, 0L, 20L);
 
-        updateScoreboard();
+        updateDefaultScoreboard((int) currentTime, teamScores, "points");
     }
 
     private void sendTimeTitle(String title) {
@@ -151,7 +154,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
         HashMap<String, Object> team = teams.get(getState(player).team);
         PlayerInventory inv = player.getInventory();
         // Get the first item
-        String loadoutName = (String) getVariable("loadout-name");
+        String loadoutName = (String) getVariable("loadout-lasertag");
         String teamName = ((String) team.get("loadout-team")).split(";")[0];
         ItemStack laserGun = CVLoadouts.getInstance().getLoadoutItem(loadoutName, teamName, 0);
 
@@ -206,7 +209,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
         }, 100L);
 
         if (error != null) {
-            GameUtils.messagePlayerList(state.keySet(), "§c§lERROR: §c" + error);
+            sendMessageToArena("§c§lERROR: §c" + error);
         } else if (teams.size() > 1) {
             finishTeamGame();
         } else {
@@ -236,46 +239,38 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
                     }
                 }
                 output.append(" win the game!");
-                p.sendMessage(output.toString());
+                sendMessageToArena(output.toString());
             });
         } else {
-            state.keySet().forEach(p -> {
-                p.sendMessage(chatColor + sortedPlayers.get(0).getDisplayName() + " has won the game!");
-            });
+            sendMessageToArena(chatColor + sortedPlayers.get(0).getDisplayName() + " has won the game!");
         }
 
-        state.keySet().forEach(p -> {
-            p.sendMessage("§b§l--- FINAL RESULTS ---");
-            sortedPlayers.forEach(player -> {
-                p.sendMessage(chatColor + player.getDisplayName() + "§f: " + getState(player).points + " points");
-            });
-            playerPostGame(p);
+        sendMessageToArena("§b§l--- FINAL RESULTS ---");
+        sortedPlayers.forEach(player -> {
+            sendMessageToArena(chatColor + player.getDisplayName() + "§f: " + getState(player).points + " points");
         });
+
+        state.keySet().forEach(this::playerPostGame);
     }
 
 
     private void finishTeamGame() {
         List<Integer[]> sortedTeams = teamScores.stream().sorted(Comparator.comparingInt(o -> -1 * o[1])).collect(Collectors.toList());
         if (Objects.equals(sortedTeams.get(0)[1], sortedTeams.get(1)[1])) {
-            state.keySet().forEach(p -> {
-                p.sendMessage("§f§lTie Game!");
-            });
+            sendMessageToArena("§f§lTie Game!");
         } else {
             String teamName = (String) teams.get(sortedTeams.get(0)[0]).get("name");
             ChatColor chatColor = (ChatColor) teams.get(sortedTeams.get(0)[0]).get("chat-color");
-            state.keySet().forEach(p -> {
-                p.sendMessage(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
-            });
+            sendMessageToArena(chatColor + "§l" + teamName + chatColor + "§l has won the game!");
         }
-        state.keySet().forEach(p -> {
-            p.sendMessage("§b§l--- FINAL RESULTS ---");
-            sortedTeams.forEach(pair -> {
-                String teamName = (String) teams.get(pair[0]).get("name");
-                ChatColor chatColor = (ChatColor) teams.get(pair[0]).get("chat-color");
-                p.sendMessage(chatColor + teamName + "§f: " + pair[1] + " points");
-            });
-            playerPostGame(p);
+        sendMessageToArena("§b§l--- FINAL RESULTS ---");
+        sortedTeams.forEach(pair -> {
+            String teamName = (String) teams.get(pair[0]).get("name");
+            ChatColor chatColor = (ChatColor) teams.get(pair[0]).get("chat-color");
+            sendMessageToArena(chatColor + teamName + "§f: " + pair[1] + " points");
         });
+
+        state.keySet().forEach(this::playerPostGame);
     }
 
     private void playerPostGame(Player p) {
@@ -299,33 +294,6 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
 //        } else {
 //            player.sendMessage("§7Accuracy: §f" + String.format("%.2f", ((float) ps.points / (float) ps.timesFired) * 100F) + "%");
 //        }
-    }
-
-    private void updateScoreboard() {
-        Scoreboard scoreboard;
-        ArrayList<String> scoreboardLines = new ArrayList<>();
-
-        scoreboardLines.add("§bTime remaining: §f" +
-                String.format("%d:%02d", (int) currentTime / 60000, (int) (currentTime / 1000) % 60)
-        );
-        scoreboardLines.add("   ");
-
-        if (teams.size() == 1) {
-            state.keySet().stream().sorted(Comparator.comparingInt(o -> -1 * getState(o).points)).forEach( p -> {
-                int points = getState(p).points;
-                scoreboardLines.add("§a" + p.getDisplayName() + "§f: " + points + " points");
-            });
-            scoreboard = GameUtils.createScoreboard(arena, "§b§lFFA Laser Tag", scoreboardLines);
-        } else {
-            for (int i = 0; i < teamScores.size(); i++) {
-                String line = teams.get(i).get("name") + "§f: ";
-                line += teamScores.get(i)[1];
-                line += " points";
-                scoreboardLines.add(line);
-            }
-            scoreboard = GameUtils.createScoreboard(arena, "§b§lTeam Laser Tag", scoreboardLines);
-        }
-        this.state.keySet().forEach(p -> p.setScoreboard(scoreboard));
     }
 
     @Override
@@ -380,11 +348,10 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
             teamScores.set(attackerState.team, new Integer[]{ attackerState.team, teamScores.get(attackerState.team)[1] + 1 });
 
             int maxScore = (int) getVariable("max-score");
-            attacker.sendMessage("§aYou have hit " + hit.getName() + "!");
             attacker.playSound(attacker.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0F, 0.7F);
-            hit.sendMessage("§cYou have been hit by " + attacker.getName() + "!");
             hit.playSound(hit.getLocation(), Sound.ENTITY_VEX_HURT, 1.0F, 0.5F);
             hit.playSound(hit.getLocation(), Sound.BLOCK_CONDUIT_AMBIENT, 1.0F, 1.5F);
+            sendMessageToArena(teams.get(attackerState.team).get("chat-color") + attacker.getDisplayName() + "§e has hit " + teams.get(hitState.team).get("chat-color") + hit.getDisplayName());
 
             if (teams.size() > 1) {
                 if (teamScores.get(attackerState.team)[1] >= maxScore) {
@@ -399,7 +366,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
             }
 
             long invunlDuration = ((int) getVariable("invuln-duration") * 1000L);
-            String loadoutName = (String) getVariable("loadout-name");
+            String loadoutName = (String) getVariable("loadout-lasertag");
             List<String> teamLoadouts = Arrays.asList(((String) teams.get(hitState.team).get("loadout-team")).split(";"));
 
             hitState.armorFlashID = Bukkit.getScheduler().scheduleSyncRepeatingTask(CVPaintball.getInstance(), () -> {
@@ -427,7 +394,7 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
                 }
             }, 0L, 5L);
 
-            updateScoreboard();
+            updateDefaultScoreboard((int) currentTime, teamScores, "points");
         }
     }
 }

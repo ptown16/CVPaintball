@@ -2,10 +2,11 @@ package org.cubeville.cvpaintball.lasertag;
 
 import org.bukkit.Color;
 import org.bukkit.inventory.ItemStack;
+import org.cubeville.cvgames.models.PlayerState;
 
 import java.util.Set;
 
-public class LaserTagState {
+public class LaserTagState extends PlayerState {
     int team;
     Long lastRecharge = null;
     Long lastHit = null;
@@ -17,5 +18,10 @@ public class LaserTagState {
 
     public LaserTagState(int team) {
         this.team = team;
+    }
+
+    @Override
+    public int getSortingValue() {
+        return points;
     }
 }
