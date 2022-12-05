@@ -15,8 +15,8 @@ public final class CVPaintball extends JavaPlugin {
     @Override
     public void onEnable() {
         instance = this;
-        CVGames.gameManager().registerGame("paintball", Paintball.class);
-        CVGames.gameManager().registerGame("lasertag", LaserTag.class);
+        CVGames.gameManager().registerGame("paintball", Paintball::new);
+        CVGames.gameManager().registerGame("lasertag", LaserTag::new);
         PluginManager pm = Bukkit.getPluginManager();
         effects = (Effects) pm.getPlugin("ArmamentsEffects");    }
 
