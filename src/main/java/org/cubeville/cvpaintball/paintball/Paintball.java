@@ -37,24 +37,24 @@ public class Paintball extends TeamSelectorGame {
 
     public Paintball(String id, String arenaName) {
         super(id, arenaName);
-        addGameVariable("spectate-lobby", new GameVariableLocation());
-        addGameVariable("ammo", new GameVariableInt(), 16);
-        addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class));
-        addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
-        addGameVariable("fire-cooldown", new GameVariableDouble(), 0.5);
+        addGameVariable("spectate-lobby", new GameVariableLocation("The location the players go when they are eliminated"));
+        addGameVariable("ammo", new GameVariableInt("The amount of ammo players get on game start and on recharge"), 16);
+        addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class, "Regions that will refill the player's ammo"));
+        addGameVariable("recharge-cooldown", new GameVariableInt("The amount of time (in seconds) between ammo refills"), 15);
+        addGameVariable("fire-cooldown", new GameVariableDouble("The amount of time (in seconds) between paintball shots"), 0.5);
         addGameVariableTeamsList(
             new HashMap<>(){{
-                put("tps", new GameVariableList<>(GameVariableLocation.class));
-                put("loadout-team", new GameVariableString());
-                put("damaged-teams", new GameVariableList<>(GameVariableString.class));
+                put("tps", new GameVariableList<>(GameVariableLocation.class, "The locations that players on this team will spawn in at"));
+                put("loadout-team", new GameVariableString("The name of the team used for loadouts"));
+                put("damaged-teams", new GameVariableList<>(GameVariableString.class,"A list of teams used for putting armor on the players (least damaged -> most damaged)"));
             }}
         );
-        addGameVariable("loadout-paintball", new GameVariableString());
-        addGameVariable("invuln-duration", new GameVariableInt(), 2);
-        addGameVariable("invuln1-loadout-team", new GameVariableString());
-        addGameVariable("invuln2-loadout-team", new GameVariableString());
-        addGameVariable("invuln-shooting", new GameVariableFlag(), false);
-        addGameVariable("infinite-ammo", new GameVariableFlag(), false);
+        addGameVariable("loadout-paintball", new GameVariableString("The base loadout used for paintball"));
+        addGameVariable("invuln-duration", new GameVariableInt("The length of invulnerability after being shot (in seconds)"), 2);
+        addGameVariable("invuln1-loadout-team", new GameVariableString("The first loadout team used for the \"blinking\" effect when a player is invulnerable"));
+        addGameVariable("invuln2-loadout-team", new GameVariableString("The second loadout team used for the \"blinking\" effect when a player is invulnerable"));
+        addGameVariable("invuln-shooting", new GameVariableFlag("Whether the player can shoot while they are invulnerable"), false);
+        addGameVariable("infinite-ammo", new GameVariableFlag("Whether the player has infinite ammo"), false);
     }
 
     @Nullable

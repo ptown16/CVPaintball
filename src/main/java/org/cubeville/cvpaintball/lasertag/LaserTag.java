@@ -36,21 +36,21 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
 
     public LaserTag(String id, String arenaName) {
         super(id, arenaName);
-        addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class));
-        addGameVariable("recharge-cooldown", new GameVariableInt(), 15);
+        addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class, "Regions that will refill the player's ammo"));
+        addGameVariable("recharge-cooldown", new GameVariableInt("The amount of time (in seconds) between ammo refills"), 15);
         addGameVariableTeamsList(
             new HashMap<>(){{
-                put("loadout-team", new GameVariableString());
-                put("tps", new GameVariableList<>(GameVariableLocation.class));
+                put("loadout-team", new GameVariableString("The name of the team used for loadouts"));
+                put("tps", new GameVariableList<>(GameVariableLocation.class, "The locations that players on this team will spawn in at"));
             }}
         );
-        addGameVariable("duration", new GameVariableInt(), 5);
-        addGameVariable("max-score", new GameVariableInt(), 20);
-        addGameVariable("invuln-duration", new GameVariableInt(), 2);
-        addGameVariable("loadout-lasertag", new GameVariableString());
-        addGameVariable("invuln1-loadout-team", new GameVariableString());
-        addGameVariable("invuln2-loadout-team", new GameVariableString());
-        addGameVariable("invuln-shooting", new GameVariableFlag(), false);
+        addGameVariable("duration", new GameVariableInt("The max amount of time a game lasts (in minutes)"), 5);
+        addGameVariable("max-score", new GameVariableInt("The max score a team can get before they win"), 20);
+        addGameVariable("invuln-duration", new GameVariableInt("The length of invulnerability after being shot (in seconds)"), 2);
+        addGameVariable("loadout-lasertag", new GameVariableString("The base loadout used for lasertag"));
+        addGameVariable("invuln1-loadout-team", new GameVariableString("The first loadout team used for the \"blinking\" effect when a player is invulnerable"));
+        addGameVariable("invuln2-loadout-team", new GameVariableString("The second loadout team used for the \"blinking\" effect when a player is invulnerable"));
+        addGameVariable("invuln-shooting", new GameVariableFlag("Whether the player can shoot while they are invulnerable"), false);
     }
 
     @Nullable
