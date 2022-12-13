@@ -53,10 +53,15 @@ public class LaserTag extends TeamSelectorGame implements PluginHookEventReceive
         addGameVariable("invuln-shooting", new GameVariableFlag("Whether the player can shoot while they are invulnerable"), false);
     }
 
-    @Nullable
+    @Override
     protected LaserTagState getState(Player p) {
         if (state.get(p) == null || !(state.get(p) instanceof LaserTagState)) return null;
         return (LaserTagState) state.get(p);
+    }
+
+    @Override
+    public int getPlayerTeamIndex(Player player) {
+        return Objects.requireNonNull(getState(player)).team;
     }
 
     @Override

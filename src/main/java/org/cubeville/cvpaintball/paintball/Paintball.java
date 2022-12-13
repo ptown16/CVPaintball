@@ -12,6 +12,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scoreboard.*;
+import org.cubeville.cvgames.CVGames;
 import org.cubeville.cvgames.models.TeamSelectorGame;
 import org.cubeville.cvgames.utils.GameUtils;
 import org.cubeville.cvgames.models.GameRegion;
@@ -37,7 +38,6 @@ public class Paintball extends TeamSelectorGame {
 
     public Paintball(String id, String arenaName) {
         super(id, arenaName);
-        addGameVariable("spectate-lobby", new GameVariableLocation("The location the players go when they are eliminated"));
         addGameVariable("ammo", new GameVariableInt("The amount of ammo players get on game start and on recharge"), 16);
         addGameVariable("recharge-zones", new GameVariableList<>(GameVariableRegion.class, "Regions that will refill the player's ammo"));
         addGameVariable("recharge-cooldown", new GameVariableInt("The amount of time (in seconds) between ammo refills"), 15);
@@ -57,10 +57,15 @@ public class Paintball extends TeamSelectorGame {
         addGameVariable("infinite-ammo", new GameVariableFlag("Whether the player has infinite ammo"), false);
     }
 
-    @Nullable
+    @Override
     protected PaintballState getState(Player p) {
         if (state.get(p) == null || !(state.get(p) instanceof PaintballState)) return null;
         return (PaintballState) state.get(p);
+    }
+
+    @Override
+    public int getPlayerTeamIndex(Player player) {
+        return Objects.requireNonNull(getState(player)).team;
     }
 
     @Override
@@ -192,7 +197,15 @@ public class Paintball extends TeamSelectorGame {
                 if (testGameEnd()) { return; }
                 hit.sendMessage("§4§lYou have been eliminated!");
                 hit.getInventory().clear();
-                hit.teleport((Location) getVariable("spectate-lobby"));
+                sendStatistics(hit);
+                state.remove(hit);
+                addSpectator(hit);
+                Bukkit.getScheduler().scheduleSyncDelayedTask(CVGames.getInstance(), () -> {
+                    // if the game is still going in a second, give them the spectator inventory
+                    if (this.isRunningGame) {
+                        arena.getQueue().setSpectatorInventory(hit.getInventory());
+                    }
+                }, 20L);
                 return;
             }
 
